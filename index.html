@@ -146,6 +146,13 @@ canvas{position:absolute;top:0;left:0;}
 .progress-track{height:4px;background:#081019;border-radius:4px;overflow:hidden;margin-top:8px;border:1px solid rgba(27,50,63,.8);}
 .progress-track span{display:block;height:100%;background:var(--phosphor);}
 .route-caveat{font-size:8px;color:var(--dim);line-height:1.4;margin-top:5px;}
+.route-warning{
+  margin-top:8px;padding:9px 10px;border:1px solid rgba(255,178,63,.45);
+  border-left:3px solid var(--amber);border-radius:3px;background:rgba(255,178,63,.07);
+}
+.route-warning-title{font-size:9px;color:var(--amber);font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;}
+.route-warning-text{font-size:9px;color:var(--text);line-height:1.45;}
+.route-warning-note{font-size:8px;color:var(--dim);line-height:1.4;margin-top:4px;}
 .nearest-airport{background:#0a141c;border:1px solid var(--panel-border);border-radius:3px;padding:9px 10px;}
 .nearest-head{display:flex;justify-content:space-between;gap:10px;align-items:baseline;}
 .nearest-distance{color:var(--phosphor);font-size:10px;white-space:nowrap;}
@@ -226,7 +233,7 @@ canvas{position:absolute;top:0;left:0;}
   <div id="stripsList"><div class="empty">No aircraft tracked yet.</div></div>
 
   <div class="note">
-    Position data comes from OpenSky Network's free volunteer receiver network, so coverage is best over the US, Europe, and other well-covered regions — a quiet scope can just mean no nearby receiver is reporting, not necessarily an empty sky. Temporary OpenSky or browser-network interruptions are retried automatically with progressively longer pauses, while the most recent successful aircraft data remains visible. Aircraft type, registration, and registered owner come from hexdb.io when available. Scheduled airline origin and destination come from adsbdb.com by matching the callsign; airport names, cities, countries, coordinates, and elevations are shown when supplied. Route progress and time remaining are straight-line estimates, not official operational ETAs. When no scheduled route exists—common for private/general-aviation tail numbers—the page loads the public OurAirports dataset and shows the nearest known airport, clearly labeled as proximity only and not a confirmed origin or destination. "Registered in" is the aircraft's registration country, not its departure airport. Squawk 7500/7600/7700 are universal emergency transponder codes, and "ident activated" reflects a pilot pressing the ident button at ATC's request—both shown for awareness, not diagnosis.
+    Position data comes from OpenSky Network's free volunteer receiver network, so coverage is best over the US, Europe, and other well-covered regions — a quiet scope can just mean no nearby receiver is reporting, not necessarily an empty sky. Temporary OpenSky or browser-network interruptions are retried automatically with progressively longer pauses, while the most recent successful aircraft data remains visible. Aircraft type, registration, and registered owner come from hexdb.io when available. Scheduled airline origin and destination come from adsbdb.com by matching the callsign; airport names, cities, countries, coordinates, and elevations are shown when supplied. Because airline flight numbers can be reused or route records can be stale, the aircraft's live position is checked against the reported great-circle route corridor. Progress and time remaining appear only when that route is geographically plausible; otherwise the route is clearly marked unverified. Any displayed progress and time remaining are straight-line estimates, not official operational ETAs. When no scheduled route exists—common for private/general-aviation tail numbers—the page loads the public OurAirports dataset and shows the nearest known airport, clearly labeled as proximity only and not a confirmed origin or destination. "Registered in" is the aircraft's registration country, not its departure airport. Squawk 7500/7600/7700 are universal emergency transponder codes, and "ident activated" reflects a pilot pressing the ident button at ATC's request—both shown for awareness, not diagnosis.
   </div>
 </div>
 
@@ -264,6 +271,14 @@ const typeCache = {};
 const routeCache = {};
 const nearestAirportCache = {};
 const ROUTE_LOOKUP_LIMIT = 20;
+// A reported route is treated as plausible only when the aircraft is reasonably close
+// to the great-circle corridor and not far before/after the route endpoints.
+const ROUTE_CORRIDOR_MIN_MILES = 75;
+const ROUTE_CORRIDOR_MAX_MILES = 250;
+const ROUTE_CORRIDOR_FRACTION = 0.12;
+const ROUTE_ENDPOINT_GRACE_MIN_MILES = 60;
+const ROUTE_ENDPOINT_GRACE_MAX_MILES = 200;
+const ROUTE_ENDPOINT_GRACE_FRACTION = 0.10;
 const OURAIRPORTS_URL = CFG.ourAirportsUrl || "https://davidmegginson.github.io/ourairports-data/airports.csv";
 const airportDataState = {items:null, promise:null, error:null};
 
@@ -677,18 +692,78 @@ function airportCardHtml(role, airport){
   </div>`;
 }
 
+function clampNumber(value, min, max){
+  return Math.max(min, Math.min(max, value));
+}
+
 function routeMetrics(plane, origin, destination){
   const coordsValid = [origin?.latitude, origin?.longitude, destination?.latitude, destination?.longitude]
     .every(v=>Number.isFinite(Number(v)));
-  if(!coordsValid) return null;
-  const total = haversineMiles(Number(origin.latitude), Number(origin.longitude), Number(destination.latitude), Number(destination.longitude));
-  const fromOrigin = haversineMiles(Number(origin.latitude), Number(origin.longitude), plane.lat, plane.lon);
-  const remaining = haversineMiles(plane.lat, plane.lon, Number(destination.latitude), Number(destination.longitude));
-  const denominator = fromOrigin + remaining;
-  const progress = denominator>0 ? Math.max(0, Math.min(100, (fromOrigin/denominator)*100)) : 0;
+  if(!coordsValid || !Number.isFinite(plane?.lat) || !Number.isFinite(plane?.lon)) return null;
+
+  const originLat = Number(origin.latitude);
+  const originLon = Number(origin.longitude);
+  const destinationLat = Number(destination.latitude);
+  const destinationLon = Number(destination.longitude);
+  const earthRadiusMiles = 3958.8;
+
+  const total = haversineMiles(originLat, originLon, destinationLat, destinationLon);
+  const fromOrigin = haversineMiles(originLat, originLon, plane.lat, plane.lon);
+  const remaining = haversineMiles(plane.lat, plane.lon, destinationLat, destinationLon);
+
+  if(!Number.isFinite(total) || total < 1) return null;
+
+  // Spherical cross-track and along-track distances relative to the reported route.
+  // Cross-track measures lateral deviation from the great-circle path. Along-track
+  // tells us whether the aircraft is before the origin, on the route, or past the destination.
+  const angularFromOrigin = fromOrigin / earthRadiusMiles;
+  const bearingOriginToAircraft = toRad(bearingDeg(originLat, originLon, plane.lat, plane.lon));
+  const bearingOriginToDestination = toRad(bearingDeg(originLat, originLon, destinationLat, destinationLon));
+  const bearingDifference = bearingOriginToAircraft - bearingOriginToDestination;
+
+  const crossTrackAngle = Math.asin(
+    clampNumber(Math.sin(angularFromOrigin) * Math.sin(bearingDifference), -1, 1)
+  );
+  const crossTrack = Math.abs(crossTrackAngle * earthRadiusMiles);
+  const alongTrack = Math.atan2(
+    Math.sin(angularFromOrigin) * Math.cos(bearingDifference),
+    Math.cos(angularFromOrigin)
+  ) * earthRadiusMiles;
+
+  const corridorAllowance = clampNumber(
+    total * ROUTE_CORRIDOR_FRACTION,
+    ROUTE_CORRIDOR_MIN_MILES,
+    ROUTE_CORRIDOR_MAX_MILES
+  );
+  const endpointGrace = clampNumber(
+    total * ROUTE_ENDPOINT_GRACE_FRACTION,
+    ROUTE_ENDPOINT_GRACE_MIN_MILES,
+    ROUTE_ENDPOINT_GRACE_MAX_MILES
+  );
+
+  const routeLengthValid = total >= 25 && total <= 10500;
+  const insideCorridor = crossTrack <= corridorAllowance;
+  const insideRouteExtent = alongTrack >= -endpointGrace && alongTrack <= total + endpointGrace;
+  const nearOrigin = fromOrigin <= endpointGrace;
+  const nearDestination = remaining <= endpointGrace;
+  const plausible = routeLengthValid && ((insideCorridor && insideRouteExtent) || nearOrigin || nearDestination);
+
+  // Use along-track position for progress rather than fromOrigin/(fromOrigin+remaining),
+  // which can misleadingly show ~50% when a stale route is thousands of miles away.
+  const progress = clampNumber((alongTrack / total) * 100, 0, 100);
   const speedMph = plane.velocity!=null ? plane.velocity*2.236936 : 0;
-  const etaHours = speedMph>=60 ? remaining/speedMph : null;
-  return {total, fromOrigin, remaining, progress, etaHours};
+  const etaHours = plausible && speedMph>=60 ? remaining/speedMph : null;
+
+  let validationReason = "";
+  if(!routeLengthValid) validationReason = "The reported airport pair has an unusual route length.";
+  else if(!insideRouteExtent && !nearOrigin && !nearDestination) validationReason = "The aircraft is well before the reported origin or beyond the reported destination.";
+  else if(!insideCorridor && !nearOrigin && !nearDestination) validationReason = "The aircraft is far outside the expected great-circle route corridor.";
+
+  return {
+    total, fromOrigin, remaining, progress, etaHours,
+    crossTrack, alongTrack, corridorAllowance, endpointGrace,
+    plausible, validationReason
+  };
 }
 
 function formatDuration(hours){
@@ -698,14 +773,36 @@ function formatDuration(hours){
   return `${Math.floor(minutes/60)}h ${minutes%60}m`;
 }
 
+function routeCodePair(origin, destination){
+  return `${airportCode(origin)} → ${airportCode(destination)}`;
+}
+
 function scheduledRouteHtml(routeState, plane){
   const origin = routeState.origin;
   const destination = routeState.destination;
   const metrics = routeMetrics(plane, origin, destination);
   const airline = routeState.airline?.name || airlineName(plane.callsign);
   const airlineCodes = [routeState.airline?.iata, routeState.airline?.icao].filter(Boolean).join(" / ");
+  const isVerified = !!metrics?.plausible;
+  const routeLabel = isVerified ? "Scheduled route" : "Reported route — unverified";
+  const sourceLabel = isVerified ? "adsbdb · plausible" : "adsbdb · unverified";
+
+  const verifiedMetricsHtml = isVerified ? `<div class="route-metrics">
+      <div class="route-metric"><span class="k">From origin</span><span class="v">${Math.round(metrics.fromOrigin).toLocaleString()} mi</span></div>
+      <div class="route-metric"><span class="k">To destination</span><span class="v">${Math.round(metrics.remaining).toLocaleString()} mi</span></div>
+      <div class="route-metric"><span class="k">Approx. time left</span><span class="v">${formatDuration(metrics.etaHours)}</span></div>
+    </div>
+    <div class="progress-track" title="Approximate progress along the reported great-circle route"><span style="width:${metrics.progress.toFixed(1)}%"></span></div>
+    <div class="route-caveat">Approx. ${Math.round(metrics.progress)}% route progress · ${Math.round(metrics.total).toLocaleString()} mi airport-to-airport · not an official ETA</div>` : "";
+
+  const warningHtml = !isVerified ? `<div class="route-warning">
+      <div class="route-warning-title">Route does not match current position</div>
+      <div class="route-warning-text">adsbdb reports ${escapeHtml(routeCodePair(origin, destination))}, but the aircraft's live location is not geographically consistent with that route.</div>
+      <div class="route-warning-note">${escapeHtml(metrics?.validationReason || "The route could not be validated against the current aircraft position.")} Flight numbers may be reused, or the route record may be stale. Progress and ETA are hidden.</div>
+    </div>` : "";
+
   return `<div class="route-panel-top">
-      <span class="route-panel-label">Scheduled route</span><span class="route-source">adsbdb</span>
+      <span class="route-panel-label">${routeLabel}</span><span class="route-source">${sourceLabel}</span>
     </div>
     <div class="airport-pair">
       ${airportCardHtml("From", origin)}
@@ -713,13 +810,8 @@ function scheduledRouteHtml(routeState, plane){
       ${airportCardHtml("To", destination)}
     </div>
     <div class="route-airline">${escapeHtml(airline)}${airlineCodes ? ` <span>· ${escapeHtml(airlineCodes)}</span>` : ""}</div>
-    ${metrics ? `<div class="route-metrics">
-      <div class="route-metric"><span class="k">From origin</span><span class="v">${Math.round(metrics.fromOrigin).toLocaleString()} mi</span></div>
-      <div class="route-metric"><span class="k">To destination</span><span class="v">${Math.round(metrics.remaining).toLocaleString()} mi</span></div>
-      <div class="route-metric"><span class="k">Approx. time left</span><span class="v">${formatDuration(metrics.etaHours)}</span></div>
-    </div>
-    <div class="progress-track" title="Approximate straight-line route progress"><span style="width:${metrics.progress.toFixed(1)}%"></span></div>
-    <div class="route-caveat">Approx. ${Math.round(metrics.progress)}% straight-line progress · ${Math.round(metrics.total).toLocaleString()} mi airport-to-airport</div>` : ""}`;
+    ${verifiedMetricsHtml}
+    ${warningHtml}`;
 }
 
 function nearestAirportHtml(state){
