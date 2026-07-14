@@ -58,6 +58,23 @@ The page also remembers the last location/radius you entered manually via
 the browser's local storage, so it doesn't strictly require editing
 `config.js` — that's just the fastest way to make it "yours" out of the box.
 
+## About the CORS proxy
+
+OpenSky's CORS support is inconsistent in practice — it can work from some
+networks and fail from others with a generic "Failed to fetch" error. To work
+around this reliably, requests are routed through a proxy that adds the
+missing header:
+
+- **Out of the box**, `config.js` points at a free public proxy
+  (`api.allorigins.win`) that needs no signup. This is fine to start with,
+  but it's a shared third-party service, so it can occasionally be slow or
+  briefly unavailable.
+- **For a more reliable setup**, deploy `cloudflare-worker.js` as a free
+  Cloudflare Worker (instructions are in that file's comments — about 10
+  minutes, no credit card) and point `corsProxy` in `config.js` at your own
+  worker URL instead. It's still $0/month, just not shared with anyone else's
+  traffic.
+
 ## Known limitations
 
 - **OpenSky's free/anonymous tier is rate-limited** (roughly one request per
