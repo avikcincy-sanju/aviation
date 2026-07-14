@@ -209,7 +209,7 @@ canvas{position:absolute;top:0;left:0;}
   <div id="stripsList"><div class="empty">No aircraft tracked yet.</div></div>
 
   <div class="note">
-    Position data comes from OpenSky Network's free volunteer receiver network, so coverage is best over the US, Europe, and other well-covered regions — a quiet scope can just mean no nearby receiver is reporting, not necessarily an empty sky. Each card also shows GPS (geometric) altitude alongside barometric altitude, how the position was derived (ADS-B, multilateration, etc.), and how many seconds old the last update is, since ground-based coverage can lag a little behind an aircraft's real position. Aircraft type, registration, and registered owner come from hexdb.io's FAA-derived registry when available. Scheduled origin and destination come from adsbdb.com by matching the OpenSky callsign. Route data is crowd-sourced and may be unavailable, incomplete, or outdated; private/general-aviation tail-number callsigns usually have no scheduled route. "Registered in" is the aircraft's country of registration, not its flight's origin airport. Squawk 7500/7600/7700 are real universal emergency transponder codes (hijack / radio failure / general emergency), and "ident activated" reflects a pilot pressing the ident button at ATC's request — both shown here for awareness, not diagnosis.
+    Position data comes from OpenSky Network's free volunteer receiver network, so coverage is best over the US, Europe, and other well-covered regions — a quiet scope can just mean no nearby receiver is reporting, not necessarily an empty sky. Temporary OpenSky or browser-network interruptions are retried automatically with progressively longer pauses, while the most recent successful aircraft data remains visible. Each card also shows GPS (geometric) altitude alongside barometric altitude, how the position was derived (ADS-B, multilateration, etc.), and how many seconds old the last update is, since ground-based coverage can lag a little behind an aircraft's real position. Aircraft type, registration, and registered owner come from hexdb.io's FAA-derived registry when available. Scheduled origin and destination come from adsbdb.com by matching the OpenSky callsign. Route data is crowd-sourced and may be unavailable, incomplete, or outdated; private/general-aviation tail-number callsigns usually have no scheduled route. "Registered in" is the aircraft's country of registration, not its flight's origin airport. Squawk 7500/7600/7700 are real universal emergency transponder codes (hijack / radio failure / general emergency), and "ident activated" reflects a pilot pressing the ident button at ATC's request — both shown here for awareness, not diagnosis.
   </div>
 </div>
 
@@ -238,7 +238,11 @@ let userLat = null, userLon = null;
 let radiusMiles = CFG.defaultRadiusMiles || 15;
 let refreshTimer = null, countdownTimer = null, secondsToNext = 0;
 let scanInProgress = false;
-const REFRESH_SECONDS = 20;
+let consecutiveScanFailures = 0;
+let lastSuccessfulScanAt = null;
+const REFRESH_SECONDS = 30;
+const MAX_BACKOFF_SECONDS = 180;
+const REQUEST_TIMEOUT_MS = 12000;
 const typeCache = {};
 const routeCache = {};
 const ROUTE_LOOKUP_LIMIT = 16;
@@ -303,29 +307,58 @@ function compass(deg){
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
 function describeHttpError(status){
-  if(status===429) return "OpenSky's free tier is rate-limited and you've hit that limit — wait a bit and try again.";
-  if(status===408) return "OpenSky's server timed out responding (a temporary overload on their end, not a rate limit).";
-  if(status>=500) return "OpenSky's server had a temporary error ("+status+").";
-  return "OpenSky returned an error ("+status+").";
+  if(status===429) return "OpenSky rate limit reached";
+  if(status===408) return "OpenSky request timed out";
+  if(status>=500) return "OpenSky server error ("+status+")";
+  return "OpenSky returned HTTP "+status;
 }
 
-async function fetchWithRetry(url, retries=2, delayMs=1500){
+function describeFetchFailure(error){
+  if(error && error.name === "AbortError") return "the request timed out";
+  const msg = String(error && error.message ? error.message : error || "").toLowerCase();
+  if(msg.includes("load failed") || msg.includes("failed to fetch") || msg.includes("networkerror")){
+    return "the browser could not reach the live feed";
+  }
+  return error && error.message ? error.message : "an unknown network error occurred";
+}
+
+async function fetchWithRetry(url, retries=2){
   let lastErr;
   for(let attempt=0; attempt<=retries; attempt++){
+    const controller = new AbortController();
+    const timeoutId = setTimeout(()=>controller.abort(), REQUEST_TIMEOUT_MS);
     try{
-      const res = await fetch(url);
+      const res = await fetch(url, {
+        signal: controller.signal,
+        cache: "no-store",
+        headers: { Accept: "application/json" }
+      });
+      clearTimeout(timeoutId);
       if(res.ok) return res;
-      lastErr = new Error(describeHttpError(res.status));
+
+      const err = new Error(describeHttpError(res.status));
+      err.status = res.status;
+      lastErr = err;
       const retryable = res.status===429 || res.status===408 || res.status>=500;
-      if(retryable && attempt<retries){ await sleep(delayMs); continue; }
-      throw lastErr;
+      if(!retryable || attempt===retries) throw err;
     } catch(e){
+      clearTimeout(timeoutId);
       lastErr = e;
-      if(attempt<retries){ await sleep(delayMs); continue; }
-      throw lastErr;
+      if(attempt===retries) throw e;
     }
+
+    // Exponential delay plus a little jitter prevents repeated synchronized retries.
+    const delayMs = (1500 * Math.pow(2, attempt)) + Math.floor(Math.random()*500);
+    await sleep(delayMs);
   }
   throw lastErr;
+}
+
+function scheduleNextScan(delaySeconds){
+  clearTimeout(refreshTimer);
+  secondsToNext = delaySeconds;
+  document.getElementById('factRefresh').textContent = secondsToNext+"s";
+  refreshTimer = setTimeout(scanNow, delaySeconds*1000);
 }
 
 async function beginScan(){
@@ -333,7 +366,7 @@ async function beginScan(){
   const latInput = document.getElementById('lat').value.trim();
   const lonInput = document.getElementById('lon').value.trim();
 
-  clearInterval(refreshTimer); clearInterval(countdownTimer);
+  clearTimeout(refreshTimer); clearInterval(countdownTimer);
 
   try{
     if(latInput && lonInput){
@@ -362,12 +395,11 @@ async function beginScan(){
   }
 
   localStorage.setItem(LS_KEYS.radius, radiusMiles);
-  await scanNow();
-  refreshTimer = setInterval(scanNow, REFRESH_SECONDS*1000);
   countdownTimer = setInterval(()=>{
     secondsToNext = Math.max(0, secondsToNext-1);
     document.getElementById('factRefresh').textContent = secondsToNext+"s";
   },1000);
+  await scanNow();
 }
 
 async function scanNow(){
@@ -376,7 +408,7 @@ async function scanNow(){
     return;
   }
   scanInProgress = true;
-  secondsToNext = REFRESH_SECONDS;
+  document.getElementById('factRefresh').textContent = "scanning";
   setStatus("Scanning "+radiusMiles+" mi around "+userLat.toFixed(3)+", "+userLon.toFixed(3)+"...");
   const latDelta = radiusMiles/69;
   const lonDelta = radiusMiles/(69*Math.max(0.15,Math.cos(toRad(userLat))));
@@ -403,13 +435,29 @@ async function scanNow(){
     });
     currentAircraft = planes.filter(p=>p.distance<=radiusMiles).sort((a,b)=>a.distance-b.distance);
 
-    setStatus(currentAircraft.length+" aircraft in range. Last scan "+new Date().toLocaleTimeString()+".");
+    lastSuccessfulScanAt = new Date();
+    consecutiveScanFailures = 0;
+    setStatus(currentAircraft.length+" aircraft in range. Last scan "+lastSuccessfulScanAt.toLocaleTimeString()+".");
     renderFacts();
     renderStrips();
     enrichTypes();
     enrichRoutes();
+    scheduleNextScan(REFRESH_SECONDS);
   } catch(e){
-    setStatus("Live feed unavailable: "+e.message+" (Already retried automatically a couple of times. If this keeps happening often, it's a sign OpenSky's shared free tier is the bottleneck — a personal ADS-B receiver would remove that dependency entirely.)", true);
+    consecutiveScanFailures += 1;
+    const retrySeconds = Math.min(
+      MAX_BACKOFF_SECONDS,
+      REFRESH_SECONDS * Math.pow(2, Math.min(consecutiveScanFailures, 3))
+    );
+    const previousData = lastSuccessfulScanAt
+      ? " Showing the last successful aircraft data from "+lastSuccessfulScanAt.toLocaleTimeString()+"."
+      : " No live aircraft data has been received yet.";
+    setStatus(
+      "Temporary live-feed interruption: "+describeFetchFailure(e)+"."+
+      previousData+" Retrying automatically in "+retrySeconds+"s.",
+      true
+    );
+    scheduleNextScan(retrySeconds);
   } finally {
     scanInProgress = false;
   }
