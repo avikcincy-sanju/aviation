@@ -109,23 +109,33 @@ canvas{position:absolute;top:0;left:0;}
   margin-top:32px;font-family:'Chakra Petch',sans-serif;font-size:13px;letter-spacing:2px;
   color:var(--dim);text-transform:uppercase;border-bottom:1px solid var(--panel-border);padding-bottom:8px;
 }
+#stripsList{
+  display:grid;grid-template-columns:repeat(auto-fill, minmax(340px, 1fr));gap:12px;margin-top:12px;
+}
 .strip{
-  display:grid;grid-template-columns:110px 1fr 90px 90px 90px 100px;gap:10px;align-items:center;
   background:var(--panel);border:1px solid var(--panel-border);border-left:3px solid var(--phosphor-dim);
-  padding:12px 14px;margin-top:8px;border-radius:3px;font-size:13px;
+  padding:14px 16px;border-radius:3px;font-size:13px;
 }
 .strip.emergency{border-left-color:var(--red);background:rgba(255,95,95,0.06);}
-.strip .callsign{color:var(--phosphor);font-weight:700;font-size:15px;}
+.strip-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--panel-border);}
+.strip .callsign{color:var(--phosphor);font-weight:700;font-size:17px;}
 .strip .sub{color:var(--dim);font-size:11px;margin-top:2px;}
-.strip .num{color:var(--text);}
-.strip .num .u{color:var(--dim);font-size:10px;margin-left:3px;}
-.strip .badge{font-size:10px;letter-spacing:1px;padding:3px 6px;border-radius:3px;display:inline-block;text-align:center;}
+.strip .airline-block{text-align:right;}
+.strip .airline-name{color:var(--text);}
+.strip .type-cell{color:var(--dim);font-size:11px;margin-top:2px;}
+.stat-grid{display:grid;grid-template-columns:repeat(3, 1fr);gap:10px 8px;}
+.stat{display:flex;flex-direction:column;}
+.stat .k{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:2px;}
+.stat .v{font-size:13px;color:var(--text);}
+.stat .v .u{color:var(--dim);font-size:10px;margin-left:2px;}
+.badges-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;}
+.badge{font-size:10px;letter-spacing:1px;padding:3px 7px;border-radius:3px;display:inline-block;text-align:center;}
 .badge.climb{background:rgba(59,226,138,0.15);color:var(--phosphor);}
 .badge.desc{background:rgba(255,178,63,0.15);color:var(--amber);}
 .badge.level{background:rgba(92,120,137,0.2);color:var(--dim);}
 .badge.ground{background:rgba(92,120,137,0.2);color:var(--dim);}
 .badge.squawk-alert{background:rgba(255,95,95,0.2);color:var(--red);}
-.type-cell{color:var(--dim);font-size:11px;}
+.badge.spi{background:rgba(79,210,255,0.15);color:var(--cyan);}
 
 .empty{color:var(--dim);font-size:13px;padding:24px 4px;}
 .note{
@@ -133,7 +143,8 @@ canvas{position:absolute;top:0;left:0;}
   border-top:1px solid var(--panel-border);padding-top:14px;
 }
 @media (max-width:720px){
-  .strip{grid-template-columns:1fr 1fr;grid-auto-rows:auto;}
+  #stripsList{grid-template-columns:1fr;}
+  .stat-grid{grid-template-columns:repeat(2, 1fr);}
   .scope-box{width:280px;height:280px;}
 }
 </style>
@@ -185,7 +196,7 @@ canvas{position:absolute;top:0;left:0;}
   <div id="stripsList"><div class="empty">No aircraft tracked yet.</div></div>
 
   <div class="note">
-    Position data comes from OpenSky Network's free volunteer receiver network, so coverage is best over the US, Europe, and other well-covered regions — a quiet scope can just mean no nearby receiver is reporting, not necessarily an empty sky. Aircraft type/registration comes from hexdb.io when available. "Registered in" is the aircraft's country of registration, not its flight's origin airport — full departure/arrival route data needs a paid API (e.g. FlightAware AeroAPI), since the free route APIs that exist don't support HTTPS and can't be called safely from a page hosted on GitHub Pages. Squawk 7500/7600/7700 are real universal emergency transponder codes (hijack / radio failure / general emergency) shown here for awareness, not diagnosis.
+    Position data comes from OpenSky Network's free volunteer receiver network, so coverage is best over the US, Europe, and other well-covered regions — a quiet scope can just mean no nearby receiver is reporting, not necessarily an empty sky. Each card also shows GPS (geometric) altitude alongside barometric altitude, how the position was derived (ADS-B, multilateration, etc.), and how many seconds old the last update is, since ground-based coverage can lag a little behind an aircraft's real position. Aircraft type, registration, and registered owner come from hexdb.io's FAA-derived registry when available. "Registered in" is the aircraft's country of registration, not its flight's origin airport — full departure/arrival route data needs a paid API (e.g. FlightAware AeroAPI), since the free route APIs that exist don't support HTTPS and can't be called safely from a page hosted on GitHub Pages. Squawk 7500/7600/7700 are real universal emergency transponder codes (hijack / radio failure / general emergency), and "ident activated" reflects a pilot pressing the ident button at ATC's request — both shown here for awareness, not diagnosis.
   </div>
 </div>
 
@@ -339,8 +350,9 @@ async function scanNow(){
 
     const planes = states.map(s=>({
       icao24:s[0], callsign:(s[1]||"").trim()||"—", regCountry:s[2],
+      timePosition:s[3], lastContact:s[4],
       lon:s[5], lat:s[6], baroAlt:s[7], onGround:s[8], velocity:s[9],
-      track:s[10], vRate:s[11], squawk:s[14]
+      track:s[10], vRate:s[11], geoAlt:s[13], squawk:s[14], spi:s[15], posSource:s[16]
     })).filter(p=>p.lat!=null && p.lon!=null);
 
     planes.forEach(p=>{
@@ -383,30 +395,53 @@ function airlineName(callsign){
   return "Unknown operator";
 }
 
+function posSourceLabel(n){
+  return {0:"ADS-B", 1:"ASTERIX", 2:"multilateration", 3:"FLARM"}[n] || "unknown";
+}
+
 function renderStrips(){
   const list = document.getElementById('stripsList');
   if(currentAircraft.length===0){
     list.innerHTML = '<div class="empty">No aircraft currently within range. Try a larger radius or check back — coverage depends on nearby volunteer receivers.</div>';
     return;
   }
+  const nowSec = Date.now()/1000;
   list.innerHTML = currentAircraft.map(p=>{
     const emergency = ["7500","7600","7700"].includes(p.squawk);
     const altFt = p.baroAlt!=null ? Math.round(p.baroAlt*3.281).toLocaleString()+" ft" : "—";
+    const geoAltFt = p.geoAlt!=null ? Math.round(p.geoAlt*3.281).toLocaleString()+" ft" : "—";
     const spdMph = p.velocity!=null ? Math.round(p.velocity*2.237)+" mph" : "—";
+    const dataAge = p.lastContact ? Math.max(0, Math.round(nowSec - p.lastContact))+"s ago" : "—";
+
     let trendBadge = '<span class="badge level">level</span>';
-    if(p.onGround) trendBadge = '<span class="badge ground">ground</span>';
+    if(p.onGround) trendBadge = '<span class="badge ground">on ground</span>';
     else if(p.vRate>1) trendBadge = '<span class="badge climb">climbing</span>';
     else if(p.vRate<-1) trendBadge = '<span class="badge desc">descending</span>';
-    const squawkBadge = emergency ? `<span class="badge squawk-alert">squawk ${p.squawk}</span>` : (p.squawk ? `<span style="color:var(--dim);font-size:11px;">sq ${p.squawk}</span>` : "");
+    const squawkBadge = emergency ? `<span class="badge squawk-alert">squawk ${p.squawk} — emergency</span>` : "";
+    const spiBadge = p.spi ? `<span class="badge spi">ident activated</span>` : "";
+
     const typeInfo = typeCache[p.icao24];
     return `<div class="strip ${emergency?'emergency':''}" data-icao="${p.icao24}">
-      <div><div class="callsign">${p.callsign}</div><div class="sub">${p.icao24.toUpperCase()}</div></div>
-      <div><div>${airlineName(p.callsign)}</div><div class="sub">registered in ${p.regCountry||"unknown"}</div>
-        <div class="type-cell" data-type-for="${p.icao24}">${typeInfo ? typeInfo : "looking up aircraft type…"}</div></div>
-      <div class="num">${p.distance.toFixed(1)}<span class="u">mi</span><div class="sub">${compass(p.bearing)}</div></div>
-      <div class="num">${altFt}<div class="sub">altitude</div></div>
-      <div class="num">${spdMph}<div class="sub">ground speed</div></div>
-      <div>${trendBadge}${squawkBadge?'<br>'+squawkBadge:''}</div>
+      <div class="strip-head">
+        <div><div class="callsign">${p.callsign}</div><div class="sub">${p.icao24.toUpperCase()}</div></div>
+        <div class="airline-block">
+          <div class="airline-name">${airlineName(p.callsign)}</div>
+          <div class="sub">registered in ${p.regCountry||"unknown"}</div>
+          <div class="type-cell" data-type-for="${p.icao24}">${typeCellHtml(typeInfo)}</div>
+        </div>
+      </div>
+      <div class="stat-grid">
+        <div class="stat"><span class="k">Distance</span><span class="v">${p.distance.toFixed(1)}<span class="u">mi</span></span></div>
+        <div class="stat"><span class="k">Bearing</span><span class="v">${compass(p.bearing)}<span class="u">${Math.round(p.bearing)}°</span></span></div>
+        <div class="stat"><span class="k">Ground speed</span><span class="v">${spdMph}</span></div>
+        <div class="stat"><span class="k">Baro altitude</span><span class="v">${altFt}</span></div>
+        <div class="stat"><span class="k">GPS altitude</span><span class="v">${geoAltFt}</span></div>
+        <div class="stat"><span class="k">Heading</span><span class="v">${p.track!=null ? Math.round(p.track)+"°" : "—"}</span></div>
+        <div class="stat"><span class="k">Squawk</span><span class="v">${p.squawk||"—"}</span></div>
+        <div class="stat"><span class="k">Position source</span><span class="v">${posSourceLabel(p.posSource)}</span></div>
+        <div class="stat"><span class="k">Last updated</span><span class="v">${dataAge}</span></div>
+      </div>
+      <div class="badges-row">${trendBadge}${squawkBadge}${spiBadge}</div>
     </div>`;
   }).join('');
 }
@@ -416,16 +451,29 @@ async function enrichTypes(){
   await Promise.all(targets.map(async p=>{
     try{
       const res = await fetch(`https://hexdb.io/api/v1/aircraft/${p.icao24}`);
-      if(!res.ok) return;
+      if(!res.ok){ typeCache[p.icao24] = {}; return; }
       const j = await res.json();
-      const label = [j.Manufacturer, j.Type].filter(Boolean).join(" ") || null;
-      typeCache[p.icao24] = label ? label + (j.Registration ? " · "+j.Registration : "") : "type unknown";
+      typeCache[p.icao24] = {
+        typeLabel: [j.Manufacturer, j.Type].filter(Boolean).join(" ") || null,
+        registration: j.Registration || null,
+        owner: j.RegisteredOwners || null
+      };
     } catch(e){
-      typeCache[p.icao24] = "type unknown";
+      typeCache[p.icao24] = {};
     }
     const cell = document.querySelector(`[data-type-for="${p.icao24}"]`);
-    if(cell) cell.textContent = typeCache[p.icao24];
+    if(cell) cell.innerHTML = typeCellHtml(typeCache[p.icao24]);
   }));
+}
+
+function typeCellHtml(info){
+  if(!info || (!info.typeLabel && !info.registration && !info.owner)) return "type unknown";
+  const parts = [];
+  if(info.typeLabel) parts.push(info.typeLabel);
+  if(info.registration) parts.push(info.registration);
+  let html = parts.join(" · ");
+  if(info.owner) html += `<div class="sub" style="margin-top:2px;">operated by ${info.owner}</div>`;
+  return html;
 }
 
 function drawScope(){
