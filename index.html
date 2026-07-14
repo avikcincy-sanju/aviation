@@ -326,8 +326,9 @@ async function scanNow(){
   const lomin=userLon-lonDelta, lomax=userLon+lonDelta;
 
   try{
-    const url = `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
-    const res = await fetch(url);
+    const openSkyUrl = `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
+    const fetchUrl = CFG.corsProxy ? CFG.corsProxy + encodeURIComponent(openSkyUrl) : openSkyUrl;
+    const res = await fetch(fetchUrl);
     if(!res.ok) throw new Error("OpenSky returned an error ("+res.status+"). Its free tier is rate-limited — wait a bit and try again.");
     const data = await res.json();
     const states = data.states || [];
