@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AIRSPACE — local flight scope</title>
+<title>AIRSPACE — global postal + entry chime</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
@@ -71,6 +71,8 @@ h1{
   text-transform:uppercase;display:block;margin-bottom:4px;
 }
 .field{display:flex;flex-direction:column;}
+.country-field input{width:72px;text-transform:uppercase;}
+.postal-field input{width:155px;}
 input[type=text]{
   background:#081019;border:1px solid var(--panel-border);color:var(--phosphor);
   font-family:'JetBrains Mono',monospace;font-size:14px;padding:8px 10px;
@@ -248,9 +250,13 @@ canvas{position:absolute;top:0;left:0;}
   <div class="subtitle">local aircraft scope — Airplanes.live + OpenSky Network + hexdb.io + adsbdb.com (100% free, no keys)</div>
 
   <div class="controls">
-    <div class="field">
-      <label for="zip">ZIP code</label>
-      <input type="text" id="zip" placeholder="45044" inputmode="numeric">
+    <div class="field country-field">
+      <label for="countryCode">Country</label>
+      <input type="text" id="countryCode" placeholder="US" value="US" maxlength="2" autocapitalize="characters" spellcheck="false" title="Two-letter ISO country code, such as US, CA, GB, IN or AU">
+    </div>
+    <div class="field postal-field">
+      <label for="zip">Postal / ZIP code</label>
+      <input type="text" id="zip" placeholder="45044 / SW1A 1AA" autocomplete="postal-code">
     </div>
     <div class="or">or</div>
     <div class="field">
@@ -267,7 +273,7 @@ canvas{position:absolute;top:0;left:0;}
     </div>
     <button id="scanBtn">Scan airspace</button>
   </div>
-  <div class="status-line" id="status">Enter a ZIP code or coordinates to begin.</div>
+  <div class="status-line" id="status">Enter a postal / ZIP code with its two-letter country code, or coordinates to begin.</div>
 
   <div class="ops-grid">
     <div class="ops-panel">
@@ -336,14 +342,15 @@ canvas{position:absolute;top:0;left:0;}
     <div class="ops-panel">
       <div class="ops-title">Watchlist and alerts</div>
       <div class="watch-grid"><input id="watchInput" type="text" placeholder="Callsign, reg, airline or type"><input id="alertRadius" type="number" min="1" max="60" value="5" title="Alert radius in miles"><input id="alertAltitude" type="number" min="0" max="50000" step="500" value="3000" title="Low-altitude threshold in feet"></div>
-      <div class="toggle-row"><button class="mini-btn" id="addWatchBtn" type="button">Add watch</button><button class="mini-btn" id="notifyBtn" type="button">Enable notifications</button><label class="check-label"><input type="checkbox" id="soundAlerts" checked> Sound</label><label class="check-label"><input type="checkbox" id="emergencyAlerts" checked> Emergency squawks</label></div>
+      <div class="toggle-row"><button class="mini-btn" id="addWatchBtn" type="button">Add watch</button><button class="mini-btn" id="notifyBtn" type="button">Enable notifications</button><button class="mini-btn" id="testSoundBtn" type="button">Test sound</button><label class="check-label"><input type="checkbox" id="soundAlerts" checked> Alert sound</label><label class="check-label"><input type="checkbox" id="newAircraftSound" checked> New-aircraft chime</label><label class="check-label"><input type="checkbox" id="emergencyAlerts" checked> Emergency squawks</label></div>
       <div class="watch-tags" id="watchTags"><span style="font-size:9px;color:var(--dim)">No watch terms yet.</span></div>
       <div class="alert-log" id="alertLog"><div class="alert-item" style="color:var(--dim)">Alerts work while this page is open.</div></div>
     </div>
   </div>
 
   <div class="note">
-    Live position data uses Airplanes.live with an adaptive OpenSky health-check and fallback; recent successful aircraft are also cached locally so the page can populate immediately after a reload. Both services are community-supported receiver networks with no uptime guarantee, so a quiet scope can mean no nearby receiver is reporting rather than an empty sky. If both feeds are temporarily unavailable, the page retries with progressively longer pauses while the most recent successful aircraft data remains visible. Position ages continue updating every second during an interruption: records become stale after 60 seconds, outdated after 120 seconds, and are removed after five minutes without contact. Outdated positions remain visible on their cards for context, but are excluded from the live count, closest/highest/fastest summaries, and radar dots. Aircraft trails, projected two-minute tracks, watch alerts, filters, and session analytics are calculated locally in the browser. Aircraft type, registration, and registered owner come from hexdb.io when available. Scheduled airline origin and destination come from adsbdb.com by matching the callsign; airport names, cities, countries, coordinates, and elevations are shown when supplied. Because airline flight numbers can be reused or route records can be stale, the aircraft's live position is checked against the reported great-circle route corridor. Progress and time remaining appear only when that route is geographically plausible; otherwise the route is clearly marked unverified. Any displayed progress and time remaining are straight-line estimates, not official operational ETAs. When no scheduled route exists—common for private/general-aviation tail numbers—the page loads the public OurAirports dataset and shows the nearest known airport, clearly labeled as proximity only and not a confirmed origin or destination. Airport runway and frequency details come from OurAirports. Current U.S. station observations are requested from the National Weather Service when available, with a global Open-Meteo model estimate as a fallback; model estimates are not official METARs. The map uses Leaflet and OpenStreetMap tiles. "Registered in" is the aircraft's registration country, not its departure airport. Squawk 7500/7600/7700 are universal emergency transponder codes, and "ident activated" reflects a pilot pressing the ident button at ATC's request—both shown for awareness, not diagnosis.
+    Designed by Avik Nandi 2026
+  
   </div>
 </div>
 <div class="toast-stack" id="toastStack"></div>
@@ -368,7 +375,7 @@ const AIRLINES = {
 };
 
 const CFG = window.AIRSPACE_CONFIG || {};
-const LS_KEYS = { zip:"airspace_zip", lat:"airspace_lat", lon:"airspace_lon", radius:"airspace_radius" };
+const LS_KEYS = { zip:"airspace_zip", country:"airspace_country", lat:"airspace_lat", lon:"airspace_lon", radius:"airspace_radius" };
 
 let userLat = null, userLon = null;
 let radiusMiles = CFG.defaultRadiusMiles || 15;
@@ -406,15 +413,20 @@ let currentAircraft = [];
 
 function loadDefaults(){
   const savedZip = localStorage.getItem(LS_KEYS.zip);
+  const savedCountry = localStorage.getItem(LS_KEYS.country);
   const savedLat = localStorage.getItem(LS_KEYS.lat);
   const savedLon = localStorage.getItem(LS_KEYS.lon);
   const savedRadius = localStorage.getItem(LS_KEYS.radius);
+  const defaultPostal = CFG.defaultPostalCode || CFG.defaultZip || "";
+  const defaultCountry = String(CFG.defaultCountryCode || savedCountry || "US").trim().toUpperCase();
+
+  document.getElementById('countryCode').value = /^[A-Z]{2}$/.test(defaultCountry) ? defaultCountry : "US";
 
   if(CFG.defaultLat != null && CFG.defaultLon != null){
     document.getElementById('lat').value = CFG.defaultLat;
     document.getElementById('lon').value = CFG.defaultLon;
-  } else if(CFG.defaultZip){
-    document.getElementById('zip').value = CFG.defaultZip;
+  } else if(defaultPostal){
+    document.getElementById('zip').value = defaultPostal;
   } else if(savedLat && savedLon){
     document.getElementById('lat').value = savedLat;
     document.getElementById('lon').value = savedLon;
@@ -431,6 +443,20 @@ document.getElementById('radius').addEventListener('input', e=>{
   radiusMiles = parseInt(e.target.value,10);
   document.getElementById('radiusVal').textContent = radiusMiles;
 });
+document.getElementById('countryCode').addEventListener('input', e=>{
+  e.target.value = e.target.value.replace(/[^a-z]/gi, '').slice(0,2).toUpperCase();
+  if(document.getElementById('zip').value.trim()){
+    document.getElementById('lat').value = '';
+    document.getElementById('lon').value = '';
+  }
+});
+document.getElementById('zip').addEventListener('input', ()=>{
+  document.getElementById('lat').value = '';
+  document.getElementById('lon').value = '';
+});
+['lat','lon'].forEach(id=>document.getElementById(id).addEventListener('input', ()=>{
+  document.getElementById('zip').value = '';
+}));
 document.getElementById('scanBtn').addEventListener('click', beginScan);
 
 function setStatus(msg, isErr){
@@ -662,7 +688,9 @@ function scheduleNextScan(delaySeconds){
 }
 
 async function beginScan(){
-  const zip = document.getElementById('zip').value.trim();
+  const postalCode = document.getElementById('zip').value.trim();
+  const enteredCountryCode = document.getElementById('countryCode').value.trim().toUpperCase() || "US";
+  const countryCode = enteredCountryCode === "UK" ? "GB" : enteredCountryCode;
   const latInput = document.getElementById('lat').value.trim();
   const lonInput = document.getElementById('lon').value.trim();
 
@@ -676,24 +704,30 @@ async function beginScan(){
       localStorage.setItem(LS_KEYS.lat, userLat);
       localStorage.setItem(LS_KEYS.lon, userLon);
       localStorage.removeItem(LS_KEYS.zip);
-    } else if(zip){
-      setStatus("Looking up ZIP code "+zip+"...");
-      const geo = await fetch(`https://api.zippopotam.us/us/${encodeURIComponent(zip)}`);
-      if(!geo.ok) throw new Error("Couldn't find that ZIP code (US only). Try entering coordinates instead.");
+    } else if(postalCode){
+      if(!/^[A-Z]{2}$/.test(countryCode)) throw new Error("Enter a valid two-letter country code, such as US, CA, GB, IN or AU.");
+      setStatus(`Looking up postal code ${postalCode} in ${countryCode}…`);
+      const geo = await fetch(`https://api.zippopotam.us/${encodeURIComponent(countryCode)}/${encodeURIComponent(postalCode)}`, {headers:{Accept:"application/json"}});
+      if(!geo.ok) throw new Error(`Couldn't find postal code ${postalCode} in ${countryCode}. Postal-code coverage varies by country; try a broader code or enter coordinates.`);
       const gj = await geo.json();
-      userLat = parseFloat(gj.places[0].latitude);
-      userLon = parseFloat(gj.places[0].longitude);
+      const place = Array.isArray(gj.places) ? gj.places[0] : null;
+      userLat = parseFloat(place?.latitude);
+      userLon = parseFloat(place?.longitude);
+      if(!Number.isFinite(userLat) || !Number.isFinite(userLon)) throw new Error("The postal-code service did not return usable coordinates. Try entering coordinates instead.");
       document.getElementById('lat').value = userLat.toFixed(4);
       document.getElementById('lon').value = userLon.toFixed(4);
-      localStorage.setItem(LS_KEYS.zip, zip);
+      document.getElementById('countryCode').value = countryCode;
+      localStorage.setItem(LS_KEYS.zip, postalCode);
+      localStorage.setItem(LS_KEYS.country, countryCode);
     } else {
-      throw new Error("Enter a ZIP code or coordinates first.");
+      throw new Error("Enter a postal / ZIP code with a country code, or coordinates first.");
     }
   } catch(e){
     setStatus(e.message, true);
     return;
   }
 
+  resetRadarEntryBaseline();
   localStorage.setItem(LS_KEYS.radius, radiusMiles);
   countdownTimer = setInterval(()=>{
     secondsToNext = Math.max(0, secondsToNext-1);
@@ -1519,6 +1553,11 @@ const activeAlertKeys = new Map();
 const alertItems = [];
 const sessionSightings = new Map();
 const sessionStartedAt = Date.now();
+const RADAR_ENTRY_REARM_MS = 5*60*1000;
+let radarEntryBaselineReady = false;
+let previousRadarIcaos = new Set();
+const radarEntryAlertedAt = new Map();
+let sharedAudioContext = null;
 
 function safeJsonParse(raw, fallback){ try{return JSON.parse(raw)}catch(e){return fallback} }
 function writeJsonStorage(key, value){ try{localStorage.setItem(key, JSON.stringify(value));}catch(e){} }
@@ -1698,7 +1737,7 @@ async function enhancedScanNow(){
     const result=await fetchLiveAircraft(lamin,lomin,lamax,lomax);lastLiveFeedSource=result.source;const received=Date.now()/1000;
     result.planes.forEach(p=>{p.distance=haversineMiles(userLat,userLon,p.lat,p.lon);p.bearing=bearingDeg(userLat,userLon,p.lat,p.lon)});
     currentAircraft=result.planes.filter(p=>{const age=positionAgeSeconds(p,received);return p.distance<=radiusMiles&&(age==null||age<REMOVE_POSITION_SECONDS)}).sort((a,b)=>a.distance-b.distance);
-    lastSuccessfulScanAt=new Date();consecutiveScanFailures=0;currentSnapshotIsCached=false;updateTrackHistory(currentAircraft);updateSessionAnalytics(currentAircraft);saveAircraftSnapshot();evaluateAlerts(currentAircraft);
+    lastSuccessfulScanAt=new Date();consecutiveScanFailures=0;currentSnapshotIsCached=false;updateTrackHistory(currentAircraft);updateSessionAnalytics(currentAircraft);saveAircraftSnapshot();evaluateRadarEntries(currentAircraft);evaluateAlerts(currentAircraft);
     const summary=aircraftSummaryGroups(),outdatedText=summary.outdated.length?` · ${summary.outdated.length} outdated retained`:"";
     setStatus(`${summary.live.length} live aircraft in range${outdatedText}. Feed: ${lastLiveFeedSource}. Last successful fetch ${lastSuccessfulScanAt.toLocaleTimeString()}.`);
     renderFacts();renderStrips();refreshAircraftAges();enrichTypes();enrichAirportProximity();enrichRoutes().finally(()=>{enrichAirportProximity();enrichDisplayedAirports()});updateMapLayers();scheduleNextScan(REFRESH_SECONDS);
@@ -1796,7 +1835,46 @@ function sessionSummaryText(){const a=[...sessionSightings.values()];return `AIR
 function renderWatchTerms(){const el=document.getElementById('watchTags');if(!watchTerms.size){el.innerHTML='<span style="font-size:9px;color:var(--dim)">No watch terms yet.</span>';return}el.innerHTML=[...watchTerms].map(t=>`<span class="watch-tag" data-watch-term="${escapeHtml(t)}" title="Click to remove">${escapeHtml(t)} ×</span>`).join('')}
 function addWatchTerm(term){const t=String(term||'').trim().toUpperCase();if(!t)return;watchTerms.add(t);writeJsonStorage(ENHANCED_LS.watchlist,[...watchTerms]);renderWatchTerms();document.getElementById('watchInput').value='';showToast(`Watching ${t}.`)}
 function planeMatchesWatch(p){const hay=searchablePlaneText(p).toUpperCase();return [...watchTerms].some(t=>hay.includes(t))}
-function beep(){if(!document.getElementById('soundAlerts')?.checked)return;try{const C=window.AudioContext||window.webkitAudioContext,c=new C(),o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=720;g.gain.setValueAtTime(.06,c.currentTime);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+.25);o.start();o.stop(c.currentTime+.25)}catch(e){}}
+function ensureAudioContext(){
+  try{
+    const AudioContextClass=window.AudioContext||window.webkitAudioContext;
+    if(!AudioContextClass)return null;
+    if(!sharedAudioContext)sharedAudioContext=new AudioContextClass();
+    if(sharedAudioContext.state==="suspended")sharedAudioContext.resume().catch(()=>{});
+    return sharedAudioContext;
+  }catch(e){return null;}
+}
+function playTone(context,frequency,startOffset,duration,gainValue=.055){
+  const oscillator=context.createOscillator(),gain=context.createGain(),start=context.currentTime+startOffset;
+  oscillator.type="sine";oscillator.frequency.setValueAtTime(frequency,start);oscillator.connect(gain);gain.connect(context.destination);
+  gain.gain.setValueAtTime(.0001,start);gain.gain.exponentialRampToValueAtTime(gainValue,start+.025);gain.gain.exponentialRampToValueAtTime(.0001,start+duration);
+  oscillator.start(start);oscillator.stop(start+duration+.02);
+}
+function playAlertTone(force=false){
+  if(!force&&!document.getElementById('soundAlerts')?.checked)return false;
+  const context=ensureAudioContext();if(!context)return false;playTone(context,720,0,.25,.06);return true;
+}
+function playEntryChime(force=false){
+  if(!force&&(!document.getElementById('soundAlerts')?.checked||!document.getElementById('newAircraftSound')?.checked))return false;
+  const context=ensureAudioContext();if(!context)return false;playTone(context,620,0,.18,.055);playTone(context,880,.16,.28,.06);return true;
+}
+function beep(){playAlertTone(false)}
+function resetRadarEntryBaseline(){radarEntryBaselineReady=false;previousRadarIcaos=new Set()}
+function evaluateRadarEntries(planes){
+  const now=Date.now();
+  const freshPlanes=planes.filter(p=>{const age=positionAgeSeconds(p);return age==null||age<STALE_POSITION_SECONDS});
+  const currentIcaos=new Set(freshPlanes.map(p=>p.icao24));
+  if(!radarEntryBaselineReady){previousRadarIcaos=currentIcaos;radarEntryBaselineReady=true;return;}
+  const newcomers=freshPlanes.filter(p=>!previousRadarIcaos.has(p.icao24)&&now-(radarEntryAlertedAt.get(p.icao24)||0)>=RADAR_ENTRY_REARM_MS);
+  previousRadarIcaos=currentIcaos;
+  for(const [icao,last] of radarEntryAlertedAt){if(now-last>24*60*60*1000)radarEntryAlertedAt.delete(icao)}
+  if(!newcomers.length)return;
+  newcomers.forEach(p=>radarEntryAlertedAt.set(p.icao24,now));
+  const labels=newcomers.slice(0,3).map(p=>`${p.callsign} (${p.distance.toFixed(1)} mi)`);
+  const extra=newcomers.length>3?` and ${newcomers.length-3} more`:"";
+  const message=`${newcomers.length===1?"New aircraft entered radar":"New aircraft entered radar"}: ${labels.join(", ")}${extra}.`;
+  alertItems.unshift({time:new Date(),message,type:"entry"});alertItems.splice(30);renderAlerts();showToast(message,"alert");playEntryChime(false);
+}
 function showToast(message,type='alert'){const stack=document.getElementById('toastStack');if(!stack)return;const el=document.createElement('div');el.className=`toast ${type}`;el.textContent=message;stack.appendChild(el);setTimeout(()=>el.remove(),6500)}
 function emitAlert(key,message,type='alert'){const last=activeAlertKeys.get(key)||0;if(Date.now()-last<10*60*1000)return;activeAlertKeys.set(key,Date.now());alertItems.unshift({time:new Date(),message,type});alertItems.splice(30);renderAlerts();showToast(message,type);beep();if(Notification.permission==='granted')new Notification('AIRSPACE alert',{body:message})}
 function renderAlerts(){const el=document.getElementById('alertLog');if(!alertItems.length){el.innerHTML='<div class="alert-item" style="color:var(--dim)">No alerts this session.</div>';return}el.innerHTML=alertItems.map(a=>`<div class="alert-item"><time>${a.time.toLocaleTimeString()}</time> · ${escapeHtml(a.message)}</div>`).join('')}
@@ -1809,6 +1887,14 @@ function initializeEnhancements(){
   document.getElementById('radarViewBtn')?.addEventListener('click',()=>switchView('radar'));document.getElementById('mapViewBtn')?.addEventListener('click',()=>switchView('map'));document.getElementById('trailsBtn')?.addEventListener('click',e=>{trailsEnabled=!trailsEnabled;e.currentTarget.classList.toggle('active',trailsEnabled);updateMapLayers()});document.getElementById('projectionBtn')?.addEventListener('click',e=>{projectionEnabled=!projectionEnabled;e.currentTarget.classList.toggle('active',projectionEnabled);updateMapLayers()});
   canvas.addEventListener('click',e=>{const rect=canvas.getBoundingClientRect(),x=(e.clientX-rect.left)*canvas.width/rect.width,y=(e.clientY-rect.top)*canvas.height/rect.height,target=[...lastRadarTargets].sort((a,b)=>(a.x-x)**2+(a.y-y)**2-((b.x-x)**2+(b.y-y)**2))[0];if(target&&Math.hypot(target.x-x,target.y-y)<18)selectAircraft(target.icao24,{scroll:true})});
   document.addEventListener('click',e=>{const card=e.target.closest('.strip[data-icao]');if(card&&!e.target.closest('button'))selectAircraft(card.dataset.icao);const action=e.target.closest('[data-card-action],[data-select-action]');if(action){e.stopPropagation();const type=action.dataset.cardAction||action.dataset.selectAction,icao=action.dataset.icao,p=currentAircraft.find(x=>x.icao24===icao);if(type==='pin')togglePin(icao);if(type==='copy')copyPlaneCoordinates(icao);if(type==='watch'&&p)addWatchTerm(p.callsign)}const tag=e.target.closest('[data-watch-term]');if(tag){watchTerms.delete(tag.dataset.watchTerm);writeJsonStorage(ENHANCED_LS.watchlist,[...watchTerms]);renderWatchTerms()}});
+  const savedAlertPrefs=safeJsonParse(localStorage.getItem(ENHANCED_LS.alertPrefs),{});
+  if(typeof savedAlertPrefs.soundAlerts==="boolean")document.getElementById('soundAlerts').checked=savedAlertPrefs.soundAlerts;
+  if(typeof savedAlertPrefs.newAircraftSound==="boolean")document.getElementById('newAircraftSound').checked=savedAlertPrefs.newAircraftSound;
+  if(typeof savedAlertPrefs.emergencyAlerts==="boolean")document.getElementById('emergencyAlerts').checked=savedAlertPrefs.emergencyAlerts;
+  const saveAlertPrefs=()=>writeJsonStorage(ENHANCED_LS.alertPrefs,{soundAlerts:!!document.getElementById('soundAlerts')?.checked,newAircraftSound:!!document.getElementById('newAircraftSound')?.checked,emergencyAlerts:!!document.getElementById('emergencyAlerts')?.checked});
+  ['soundAlerts','newAircraftSound','emergencyAlerts'].forEach(id=>document.getElementById(id)?.addEventListener('change',saveAlertPrefs));
+  ['pointerdown','keydown','touchstart'].forEach(eventName=>window.addEventListener(eventName,ensureAudioContext,{once:true,passive:true}));
+  document.getElementById('testSoundBtn')?.addEventListener('click',()=>{const played=playEntryChime(true);showToast(played?'New-aircraft chime is ready.':'This browser could not start audio.','alert')});
   document.getElementById('addWatchBtn')?.addEventListener('click',()=>addWatchTerm(document.getElementById('watchInput').value));document.getElementById('watchInput')?.addEventListener('keydown',e=>{if(e.key==='Enter')addWatchTerm(e.currentTarget.value)});document.getElementById('notifyBtn')?.addEventListener('click',async()=>{if(!('Notification'in window)){showToast('Browser notifications are not supported here.');return}const result=await Notification.requestPermission();showToast(result==='granted'?'Notifications enabled while this page is open.':'Notifications were not enabled.')});
   document.getElementById('exportCsvBtn')?.addEventListener('click',exportSessionCsv);document.getElementById('exportJsonBtn')?.addEventListener('click',()=>exportBlob('airspace-session.json','application/json',JSON.stringify({startedAt:new Date(sessionStartedAt).toISOString(),sightings:[...sessionSightings.values()]},null,2)));document.getElementById('copySummaryBtn')?.addEventListener('click',async()=>{await navigator.clipboard?.writeText(sessionSummaryText());showToast('Session summary copied.')});document.getElementById('clearSessionBtn')?.addEventListener('click',()=>{sessionSightings.clear();renderSessionAnalytics();showToast('Session analytics cleared.')});
 }
@@ -1820,7 +1906,7 @@ loadDefaults=enhancedLoadDefaults;
 
 
 loadDefaults();
-if(CFG.autoScanOnLoad && (CFG.defaultZip || (CFG.defaultLat!=null && CFG.defaultLon!=null) || localStorage.getItem(LS_KEYS.zip) || localStorage.getItem(LS_KEYS.lat))){
+if(CFG.autoScanOnLoad && (CFG.defaultPostalCode || CFG.defaultZip || (CFG.defaultLat!=null && CFG.defaultLon!=null) || localStorage.getItem(LS_KEYS.zip) || localStorage.getItem(LS_KEYS.lat))){
   beginScan();
 }
 </script>
