@@ -213,6 +213,7 @@ const LS_KEYS = { zip:"airspace_zip", lat:"airspace_lat", lon:"airspace_lon", ra
 let userLat = null, userLon = null;
 let radiusMiles = CFG.defaultRadiusMiles || 15;
 let refreshTimer = null, countdownTimer = null, secondsToNext = 0;
+let scanInProgress = false;
 const REFRESH_SECONDS = 20;
 const typeCache = {};
 
@@ -309,15 +310,18 @@ async function beginScan(){
   localStorage.setItem(LS_KEYS.radius, radiusMiles);
   await scanNow();
   refreshTimer = setInterval(scanNow, REFRESH_SECONDS*1000);
-  secondsToNext = REFRESH_SECONDS;
   countdownTimer = setInterval(()=>{
-    secondsToNext--;
-    if(secondsToNext<0) secondsToNext = REFRESH_SECONDS;
+    secondsToNext = Math.max(0, secondsToNext-1);
     document.getElementById('factRefresh').textContent = secondsToNext+"s";
   },1000);
 }
 
 async function scanNow(){
+  if(scanInProgress){
+    setStatus("A scan is already in progress — results will update in a moment.");
+    return;
+  }
+  scanInProgress = true;
   secondsToNext = REFRESH_SECONDS;
   setStatus("Scanning "+radiusMiles+" mi around "+userLat.toFixed(3)+", "+userLon.toFixed(3)+"...");
   const latDelta = radiusMiles/69;
@@ -351,6 +355,8 @@ async function scanNow(){
     enrichTypes();
   } catch(e){
     setStatus("Live feed unavailable: "+e.message+" (Free public APIs sometimes rate-limit or block direct browser requests — this runs more reliably with your own ADS-B receiver feeding the page server-side.)", true);
+  } finally {
+    scanInProgress = false;
   }
 }
 
