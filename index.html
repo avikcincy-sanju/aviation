@@ -123,19 +123,33 @@ canvas{position:absolute;top:0;left:0;}
 .strip .airline-block{text-align:right;}
 .strip .airline-name{color:var(--text);}
 .strip .type-cell{color:var(--dim);font-size:11px;margin-top:2px;}
-.route-row{
-  display:grid;grid-template-columns:88px 1fr;gap:10px;align-items:center;
+.route-panel{
   margin:0 0 12px;padding:10px 0 12px;border-bottom:1px solid var(--panel-border);
 }
-.route-label{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;}
-.route-path{min-width:0;}
-.route-main{display:flex;align-items:center;gap:8px;min-width:0;}
-.route-airport{min-width:0;display:flex;align-items:baseline;gap:6px;}
-.route-code{color:var(--cyan);font-size:14px;font-weight:700;letter-spacing:1px;white-space:nowrap;}
-.route-city{color:var(--text);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.route-arrow{color:var(--phosphor);font-size:14px;flex:0 0 auto;}
-.route-detail{color:var(--dim);font-size:9px;line-height:1.4;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.route-pending,.route-empty{color:var(--dim);font-size:11px;}
+.route-panel-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px;}
+.route-panel-label{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;}
+.route-source{font-size:9px;color:var(--phosphor-dim);letter-spacing:.7px;text-transform:uppercase;}
+.airport-pair{display:grid;grid-template-columns:minmax(0,1fr) 26px minmax(0,1fr);align-items:stretch;gap:7px;}
+.airport-card{background:#0a141c;border:1px solid var(--panel-border);border-radius:3px;padding:9px 10px;min-width:0;}
+.airport-role{font-size:8px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:3px;}
+.airport-codes{color:var(--cyan);font-size:15px;font-weight:700;letter-spacing:.7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.airport-codes .icao{color:var(--dim);font-size:10px;font-weight:500;}
+.airport-name{font-size:10px;color:var(--text);line-height:1.35;margin-top:4px;}
+.airport-meta{font-size:9px;color:var(--dim);line-height:1.4;margin-top:3px;}
+.route-arrow-box{display:flex;align-items:center;justify-content:center;color:var(--phosphor);font-size:17px;}
+.route-airline{font-size:10px;color:var(--text);margin-top:8px;}
+.route-airline span{color:var(--dim);}
+.route-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:8px;}
+.route-metric{background:#0a141c;border:1px solid var(--panel-border);border-radius:3px;padding:7px 8px;min-width:0;}
+.route-metric .k{font-size:8px;color:var(--dim);letter-spacing:.8px;text-transform:uppercase;display:block;margin-bottom:2px;}
+.route-metric .v{font-size:10px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.progress-track{height:4px;background:#081019;border-radius:4px;overflow:hidden;margin-top:8px;border:1px solid rgba(27,50,63,.8);}
+.progress-track span{display:block;height:100%;background:var(--phosphor);}
+.route-caveat{font-size:8px;color:var(--dim);line-height:1.4;margin-top:5px;}
+.nearest-airport{background:#0a141c;border:1px solid var(--panel-border);border-radius:3px;padding:9px 10px;}
+.nearest-head{display:flex;justify-content:space-between;gap:10px;align-items:baseline;}
+.nearest-distance{color:var(--phosphor);font-size:10px;white-space:nowrap;}
+.route-loading,.route-empty{color:var(--dim);font-size:10px;line-height:1.5;}
 .stat-grid{display:grid;grid-template-columns:repeat(3, 1fr);gap:10px 8px;}
 .stat{display:flex;flex-direction:column;}
 .stat .k{font-size:9px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:2px;}
@@ -159,6 +173,9 @@ canvas{position:absolute;top:0;left:0;}
   #stripsList{grid-template-columns:1fr;}
   .stat-grid{grid-template-columns:repeat(2, 1fr);}
   .scope-box{width:280px;height:280px;}
+  .airport-pair{grid-template-columns:1fr;}
+  .route-arrow-box{height:16px;transform:rotate(90deg);}
+  .route-metrics{grid-template-columns:1fr;}
 }
 </style>
 </head>
@@ -209,7 +226,7 @@ canvas{position:absolute;top:0;left:0;}
   <div id="stripsList"><div class="empty">No aircraft tracked yet.</div></div>
 
   <div class="note">
-    Position data comes from OpenSky Network's free volunteer receiver network, so coverage is best over the US, Europe, and other well-covered regions — a quiet scope can just mean no nearby receiver is reporting, not necessarily an empty sky. Temporary OpenSky or browser-network interruptions are retried automatically with progressively longer pauses, while the most recent successful aircraft data remains visible. Each card also shows GPS (geometric) altitude alongside barometric altitude, how the position was derived (ADS-B, multilateration, etc.), and how many seconds old the last update is, since ground-based coverage can lag a little behind an aircraft's real position. Aircraft type, registration, and registered owner come from hexdb.io's FAA-derived registry when available. Scheduled origin and destination come from adsbdb.com by matching the OpenSky callsign. Route data is crowd-sourced and may be unavailable, incomplete, or outdated; private/general-aviation tail-number callsigns usually have no scheduled route. "Registered in" is the aircraft's country of registration, not its flight's origin airport. Squawk 7500/7600/7700 are real universal emergency transponder codes (hijack / radio failure / general emergency), and "ident activated" reflects a pilot pressing the ident button at ATC's request — both shown here for awareness, not diagnosis.
+    Position data comes from OpenSky Network's free volunteer receiver network, so coverage is best over the US, Europe, and other well-covered regions — a quiet scope can just mean no nearby receiver is reporting, not necessarily an empty sky. Temporary OpenSky or browser-network interruptions are retried automatically with progressively longer pauses, while the most recent successful aircraft data remains visible. Aircraft type, registration, and registered owner come from hexdb.io when available. Scheduled airline origin and destination come from adsbdb.com by matching the callsign; airport names, cities, countries, coordinates, and elevations are shown when supplied. Route progress and time remaining are straight-line estimates, not official operational ETAs. When no scheduled route exists—common for private/general-aviation tail numbers—the page loads the public OurAirports dataset and shows the nearest known airport, clearly labeled as proximity only and not a confirmed origin or destination. "Registered in" is the aircraft's registration country, not its departure airport. Squawk 7500/7600/7700 are universal emergency transponder codes, and "ident activated" reflects a pilot pressing the ident button at ATC's request—both shown for awareness, not diagnosis.
   </div>
 </div>
 
@@ -245,7 +262,10 @@ const MAX_BACKOFF_SECONDS = 180;
 const REQUEST_TIMEOUT_MS = 12000;
 const typeCache = {};
 const routeCache = {};
-const ROUTE_LOOKUP_LIMIT = 16;
+const nearestAirportCache = {};
+const ROUTE_LOOKUP_LIMIT = 20;
+const OURAIRPORTS_URL = CFG.ourAirportsUrl || "https://davidmegginson.github.io/ourairports-data/airports.csv";
+const airportDataState = {items:null, promise:null, error:null};
 
 const statusEl = document.getElementById('status');
 const canvas = document.getElementById('scope');
@@ -416,7 +436,7 @@ async function scanNow(){
   const lomin=userLon-lonDelta, lomax=userLon+lonDelta;
 
   try{
-    const openSkyUrl = `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
+    const openSkyUrl = `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}&extended=1`;
     const fetchUrl = CFG.corsProxy ? CFG.corsProxy + encodeURIComponent(openSkyUrl) : openSkyUrl;
     const res = await fetchWithRetry(fetchUrl);
     const data = await res.json();
@@ -426,7 +446,8 @@ async function scanNow(){
       icao24:s[0], callsign:(s[1]||"").trim()||"—", regCountry:s[2],
       timePosition:s[3], lastContact:s[4],
       lon:s[5], lat:s[6], baroAlt:s[7], onGround:s[8], velocity:s[9],
-      track:s[10], vRate:s[11], geoAlt:s[13], squawk:s[14], spi:s[15], posSource:s[16]
+      track:s[10], vRate:s[11], geoAlt:s[13], squawk:s[14], spi:s[15], posSource:s[16],
+      category:s.length>17 ? s[17] : null
     })).filter(p=>p.lat!=null && p.lon!=null);
 
     planes.forEach(p=>{
@@ -441,7 +462,8 @@ async function scanNow(){
     renderFacts();
     renderStrips();
     enrichTypes();
-    enrichRoutes();
+    enrichAirportProximity();
+    enrichRoutes().finally(()=>enrichAirportProximity());
     scheduleNextScan(REFRESH_SECONDS);
   } catch(e){
     consecutiveScanFailures += 1;
@@ -490,6 +512,18 @@ function posSourceLabel(n){
   return {0:"ADS-B", 1:"ASTERIX", 2:"multilateration", 3:"FLARM"}[n] || "unknown";
 }
 
+function categoryLabel(n){
+  return {
+    0:"No category information", 1:"Emitter category unavailable", 2:"Light aircraft (<15,500 lb)",
+    3:"Small aircraft (15,500–75,000 lb)", 4:"Large aircraft (75,000–300,000 lb)",
+    5:"High-vortex large", 6:"Heavy aircraft (>300,000 lb)", 7:"High-performance aircraft",
+    8:"Rotorcraft", 9:"Glider / sailplane", 10:"Lighter-than-air", 11:"Parachutist / skydiver",
+    12:"Ultralight / hang-glider", 13:"Reserved category", 14:"Unmanned aerial vehicle",
+    15:"Space / trans-atmospheric", 16:"Emergency surface vehicle", 17:"Service surface vehicle",
+    18:"Point obstacle", 19:"Cluster obstacle", 20:"Line obstacle"
+  }[n] || "Unknown";
+}
+
 function renderStrips(){
   const list = document.getElementById('stripsList');
   if(currentAircraft.length===0){
@@ -502,27 +536,31 @@ function renderStrips(){
     const altFt = p.baroAlt!=null ? Math.round(p.baroAlt*3.281).toLocaleString()+" ft" : "—";
     const geoAltFt = p.geoAlt!=null ? Math.round(p.geoAlt*3.281).toLocaleString()+" ft" : "—";
     const spdMph = p.velocity!=null ? Math.round(p.velocity*2.237)+" mph" : "—";
+    const verticalFpm = p.vRate!=null ? Math.round(p.vRate*196.8504) : null;
+    const verticalText = verticalFpm==null ? "—" : `${verticalFpm>0?"+":""}${verticalFpm.toLocaleString()} ft/min`;
     const dataAge = p.lastContact ? Math.max(0, Math.round(nowSec - p.lastContact))+"s ago" : "—";
+    const coordinates = `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`;
 
     let trendBadge = '<span class="badge level">level</span>';
     if(p.onGround) trendBadge = '<span class="badge ground">on ground</span>';
     else if(p.vRate>1) trendBadge = '<span class="badge climb">climbing</span>';
     else if(p.vRate<-1) trendBadge = '<span class="badge desc">descending</span>';
-    const squawkBadge = emergency ? `<span class="badge squawk-alert">squawk ${p.squawk} — emergency</span>` : "";
+    const squawkBadge = emergency ? `<span class="badge squawk-alert">squawk ${escapeHtml(p.squawk)} — emergency</span>` : "";
     const spiBadge = p.spi ? `<span class="badge spi">ident activated</span>` : "";
 
     const typeInfo = typeCache[p.icao24];
+    const callsign = escapeHtml(p.callsign);
     return `<div class="strip ${emergency?'emergency':''}" data-icao="${p.icao24}">
       <div class="strip-head">
-        <div><div class="callsign">${p.callsign}</div><div class="sub">${p.icao24.toUpperCase()}</div></div>
+        <div><div class="callsign">${callsign}</div><div class="sub">${p.icao24.toUpperCase()}</div></div>
         <div class="airline-block">
-          <div class="airline-name">${airlineName(p.callsign)}</div>
-          <div class="sub">registered in ${p.regCountry||"unknown"}</div>
+          <div class="airline-name">${escapeHtml(airlineName(p.callsign))}</div>
+          <div class="sub">registered in ${escapeHtml(p.regCountry||"unknown")}</div>
           <div class="type-cell" data-type-for="${p.icao24}">${typeCellHtml(typeInfo)}</div>
         </div>
       </div>
-      <div class="route-row" data-route-for="${p.icao24}">
-        ${routeCellHtml(routeCache[normalizeCallsign(p.callsign)], p.callsign)}
+      <div class="route-panel" data-route-for="${p.icao24}">
+        ${routeCellHtml(routeCache[normalizeCallsign(p.callsign)], p)}
       </div>
       <div class="stat-grid">
         <div class="stat"><span class="k">Distance</span><span class="v">${p.distance.toFixed(1)}<span class="u">mi</span></span></div>
@@ -530,8 +568,11 @@ function renderStrips(){
         <div class="stat"><span class="k">Ground speed</span><span class="v">${spdMph}</span></div>
         <div class="stat"><span class="k">Baro altitude</span><span class="v">${altFt}</span></div>
         <div class="stat"><span class="k">GPS altitude</span><span class="v">${geoAltFt}</span></div>
-        <div class="stat"><span class="k">Heading</span><span class="v">${p.track!=null ? Math.round(p.track)+"°" : "—"}</span></div>
-        <div class="stat"><span class="k">Squawk</span><span class="v">${p.squawk||"—"}</span></div>
+        <div class="stat"><span class="k">True track</span><span class="v">${p.track!=null ? Math.round(p.track)+"°" : "—"}</span></div>
+        <div class="stat"><span class="k">Vertical speed</span><span class="v">${verticalText}</span></div>
+        <div class="stat"><span class="k">Aircraft category</span><span class="v">${escapeHtml(categoryLabel(p.category))}</span></div>
+        <div class="stat"><span class="k">Coordinates</span><span class="v">${coordinates}</span></div>
+        <div class="stat"><span class="k">Squawk</span><span class="v">${escapeHtml(p.squawk||"—")}</span></div>
         <div class="stat"><span class="k">Position source</span><span class="v">${posSourceLabel(p.posSource)}</span></div>
         <div class="stat"><span class="k">Last updated</span><span class="v">${dataAge}</span></div>
       </div>
@@ -539,7 +580,6 @@ function renderStrips(){
     </div>`;
   }).join('');
 }
-
 async function enrichTypes(){
   const targets = currentAircraft.slice(0,8).filter(p=>!typeCache[p.icao24]);
   await Promise.all(targets.map(async p=>{
@@ -588,62 +628,159 @@ function canLookupRoute(callsign){
 
 function airportCode(airport){
   if(!airport) return "—";
-  return airport.iata_code || airport.icao_code || "—";
+  return airport.iata_code || airport.icao_code || airport.gps_code || airport.local_code || airport.ident || "—";
 }
 
-function airportCity(airport){
-  if(!airport) return "Unknown airport";
-  return airport.municipality || airport.name || airport.icao_code || airport.iata_code || "Unknown airport";
-}
-
-function airportDetail(airport){
+function secondaryAirportCode(airport){
   if(!airport) return "";
-  const codes = [airport.iata_code, airport.icao_code].filter(Boolean).join(" / ");
-  const name = airport.name || "";
-  return [name, codes].filter(Boolean).join(" · ");
+  const primary = airportCode(airport);
+  return [airport.icao_code, airport.gps_code, airport.local_code, airport.ident]
+    .find(code=>code && code!==primary) || "";
 }
 
-function routeCellHtml(routeState, callsign){
-  if(!canLookupRoute(callsign)){
-    return `<div class="route-label">Scheduled route</div><div class="route-empty">No scheduled route</div>`;
-  }
-  if(routeState === undefined || routeState?.loading){
-    return `<div class="route-label">Scheduled route</div><div class="route-pending">Looking up route…</div>`;
-  }
-  if(!routeState || !routeState.origin || !routeState.destination){
-    return `<div class="route-label">Scheduled route</div><div class="route-empty">Route unavailable</div>`;
-  }
+function countryNameFromIso(code){
+  if(!code) return "";
+  try{
+    if(typeof Intl.DisplayNames === "function"){
+      return new Intl.DisplayNames(["en"], {type:"region"}).of(String(code).toUpperCase()) || code;
+    }
+  } catch(e){}
+  return code;
+}
 
+function airportCountry(airport){
+  if(!airport) return "";
+  return airport.country_name || countryNameFromIso(airport.country_iso_name || airport.iso_country);
+}
+
+function airportElevation(airport){
+  if(!airport) return null;
+  const raw = airport.elevation ?? airport.elevation_ft;
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.round(value) : null;
+}
+
+function airportCardHtml(role, airport){
+  if(!airport) return `<div class="airport-card"><div class="airport-role">${escapeHtml(role)}</div><div class="route-empty">Airport details unavailable</div></div>`;
+  const primary = escapeHtml(airportCode(airport));
+  const secondary = escapeHtml(secondaryAirportCode(airport));
+  const name = escapeHtml(airport.name || "Unknown airport");
+  const municipality = escapeHtml(airport.municipality || "Unknown city");
+  const country = escapeHtml(airportCountry(airport));
+  const elevation = airportElevation(airport);
+  const meta = [municipality, country, elevation!=null ? `${elevation.toLocaleString()} ft elev.` : ""].filter(Boolean).join(" · ");
+  return `<div class="airport-card">
+    <div class="airport-role">${escapeHtml(role)}</div>
+    <div class="airport-codes">${primary}${secondary ? ` <span class="icao">/ ${secondary}</span>` : ""}</div>
+    <div class="airport-name">${name}</div>
+    ${meta ? `<div class="airport-meta">${meta}</div>` : ""}
+  </div>`;
+}
+
+function routeMetrics(plane, origin, destination){
+  const coordsValid = [origin?.latitude, origin?.longitude, destination?.latitude, destination?.longitude]
+    .every(v=>Number.isFinite(Number(v)));
+  if(!coordsValid) return null;
+  const total = haversineMiles(Number(origin.latitude), Number(origin.longitude), Number(destination.latitude), Number(destination.longitude));
+  const fromOrigin = haversineMiles(Number(origin.latitude), Number(origin.longitude), plane.lat, plane.lon);
+  const remaining = haversineMiles(plane.lat, plane.lon, Number(destination.latitude), Number(destination.longitude));
+  const denominator = fromOrigin + remaining;
+  const progress = denominator>0 ? Math.max(0, Math.min(100, (fromOrigin/denominator)*100)) : 0;
+  const speedMph = plane.velocity!=null ? plane.velocity*2.236936 : 0;
+  const etaHours = speedMph>=60 ? remaining/speedMph : null;
+  return {total, fromOrigin, remaining, progress, etaHours};
+}
+
+function formatDuration(hours){
+  if(hours==null || !Number.isFinite(hours) || hours<0 || hours>24) return "—";
+  const minutes = Math.max(1, Math.round(hours*60));
+  if(minutes<60) return `${minutes} min`;
+  return `${Math.floor(minutes/60)}h ${minutes%60}m`;
+}
+
+function scheduledRouteHtml(routeState, plane){
   const origin = routeState.origin;
   const destination = routeState.destination;
-  const originCode = escapeHtml(airportCode(origin));
-  const destinationCode = escapeHtml(airportCode(destination));
-  const originCity = escapeHtml(airportCity(origin));
-  const destinationCity = escapeHtml(airportCity(destination));
-  const detail = [airportDetail(origin), airportDetail(destination)]
-    .filter(Boolean).map(escapeHtml).join(" → ");
+  const metrics = routeMetrics(plane, origin, destination);
+  const airline = routeState.airline?.name || airlineName(plane.callsign);
+  const airlineCodes = [routeState.airline?.iata, routeState.airline?.icao].filter(Boolean).join(" / ");
+  return `<div class="route-panel-top">
+      <span class="route-panel-label">Scheduled route</span><span class="route-source">adsbdb</span>
+    </div>
+    <div class="airport-pair">
+      ${airportCardHtml("From", origin)}
+      <div class="route-arrow-box">→</div>
+      ${airportCardHtml("To", destination)}
+    </div>
+    <div class="route-airline">${escapeHtml(airline)}${airlineCodes ? ` <span>· ${escapeHtml(airlineCodes)}</span>` : ""}</div>
+    ${metrics ? `<div class="route-metrics">
+      <div class="route-metric"><span class="k">From origin</span><span class="v">${Math.round(metrics.fromOrigin).toLocaleString()} mi</span></div>
+      <div class="route-metric"><span class="k">To destination</span><span class="v">${Math.round(metrics.remaining).toLocaleString()} mi</span></div>
+      <div class="route-metric"><span class="k">Approx. time left</span><span class="v">${formatDuration(metrics.etaHours)}</span></div>
+    </div>
+    <div class="progress-track" title="Approximate straight-line route progress"><span style="width:${metrics.progress.toFixed(1)}%"></span></div>
+    <div class="route-caveat">Approx. ${Math.round(metrics.progress)}% straight-line progress · ${Math.round(metrics.total).toLocaleString()} mi airport-to-airport</div>` : ""}`;
+}
 
-  return `<div class="route-label">Scheduled route</div>
-    <div class="route-path">
-      <div class="route-main">
-        <div class="route-airport"><span class="route-code">${originCode}</span><span class="route-city">${originCity}</span></div>
-        <span class="route-arrow">→</span>
-        <div class="route-airport"><span class="route-code">${destinationCode}</span><span class="route-city">${destinationCity}</span></div>
+function nearestAirportHtml(state){
+  if(state?.loading){
+    return `<div class="route-panel-top"><span class="route-panel-label">Airport proximity</span><span class="route-source">OurAirports</span></div><div class="route-loading">No scheduled route found. Loading the nearest known airport…</div>`;
+  }
+  if(state?.error){
+    return `<div class="route-panel-top"><span class="route-panel-label">Airport proximity</span><span class="route-source">OurAirports</span></div><div class="route-empty">No scheduled route. Nearest-airport data is temporarily unavailable.</div>`;
+  }
+  if(!state?.airport){
+    return `<div class="route-panel-top"><span class="route-panel-label">Airport proximity</span><span class="route-source">OurAirports</span></div><div class="route-empty">No scheduled route or nearby airport match.</div>`;
+  }
+  const airport = state.airport;
+  const primary = escapeHtml(airportCode(airport));
+  const secondary = escapeHtml(secondaryAirportCode(airport));
+  const name = escapeHtml(airport.name || "Unknown airport");
+  const city = escapeHtml(airport.municipality || "Unknown city");
+  const country = escapeHtml(airportCountry(airport));
+  const elevation = airportElevation(airport);
+  const details = [city, country, elevation!=null ? `${elevation.toLocaleString()} ft elev.` : ""].filter(Boolean).join(" · ");
+  return `<div class="route-panel-top"><span class="route-panel-label">Nearest known airport</span><span class="route-source">OurAirports</span></div>
+    <div class="nearest-airport">
+      <div class="nearest-head">
+        <div class="airport-codes">${primary}${secondary ? ` <span class="icao">/ ${secondary}</span>` : ""}</div>
+        <div class="nearest-distance">${state.distance.toFixed(1)} mi · ${compass(state.bearing)} ${Math.round(state.bearing)}°</div>
       </div>
-      ${detail ? `<div class="route-detail">${detail}</div>` : ""}
-    </div>`;
+      <div class="airport-name">${name}</div>
+      ${details ? `<div class="airport-meta">${details}</div>` : ""}
+    </div>
+    <div class="route-caveat">Proximity only — this is not a confirmed departure airport or destination.</div>`;
+}
+
+function routeCellHtml(routeState, plane){
+  if(routeState?.origin && routeState?.destination) return scheduledRouteHtml(routeState, plane);
+  const callsign = normalizeCallsign(plane.callsign);
+  if(canLookupRoute(callsign) && (routeState===undefined || routeState?.loading)){
+    return `<div class="route-panel-top"><span class="route-panel-label">Scheduled route</span><span class="route-source">adsbdb</span></div><div class="route-loading">Looking up origin and destination…</div>`;
+  }
+  const nearest = nearestAirportCache[plane.icao24];
+  if(nearest===undefined){
+    return `<div class="route-panel-top"><span class="route-panel-label">Airport proximity</span><span class="route-source">OurAirports</span></div><div class="route-loading">No scheduled route found. Finding the nearest known airport…</div>`;
+  }
+  return nearestAirportHtml(nearest);
 }
 
 async function fetchJsonWithTimeout(url, timeoutMs=8000){
   const controller = new AbortController();
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
   try{
-    const response = await fetch(url, {signal:controller.signal});
+    const response = await fetch(url, {signal:controller.signal, cache:"force-cache"});
     if(!response.ok) throw new Error(`HTTP ${response.status}`);
     return await response.json();
   } finally {
     clearTimeout(timer);
   }
+}
+
+function updateRouteRow(plane){
+  document.querySelectorAll(`[data-route-for="${plane.icao24}"]`).forEach(row=>{
+    row.innerHTML = routeCellHtml(routeCache[normalizeCallsign(plane.callsign)], plane);
+  });
 }
 
 async function enrichRoutes(){
@@ -655,36 +792,148 @@ async function enrichRoutes(){
     }
   });
 
-  const targets = [...uniqueTargets.entries()].slice(0, ROUTE_LOOKUP_LIMIT);
+  const entries = [...uniqueTargets.entries()];
+  const targets = entries.slice(0, ROUTE_LOOKUP_LIMIT);
+  entries.slice(ROUTE_LOOKUP_LIMIT).forEach(([callsign])=>{ routeCache[callsign] = {skipped:true}; });
   targets.forEach(([callsign])=>{ routeCache[callsign] = {loading:true}; });
 
-  await Promise.all(targets.map(async ([callsign, plane])=>{
+  await Promise.all(targets.map(async ([callsign])=>{
     try{
       const payload = await fetchJsonWithTimeout(
         `https://api.adsbdb.com/v0/callsign/${encodeURIComponent(callsign)}`
       );
       const flightroute = payload?.response?.flightroute;
       routeCache[callsign] = flightroute && typeof flightroute === "object"
-        ? {origin:flightroute.origin || null, destination:flightroute.destination || null}
+        ? {
+            origin:flightroute.origin || null,
+            destination:flightroute.destination || null,
+            midpoint:flightroute.midpoint || null,
+            airline:flightroute.airline || null,
+            callsignIata:flightroute.callsign_iata || null,
+            callsignIcao:flightroute.callsign_icao || null
+          }
         : null;
     } catch(e){
       routeCache[callsign] = null;
     }
 
-    document.querySelectorAll(`[data-route-for="${plane.icao24}"]`).forEach(row=>{
-      row.innerHTML = routeCellHtml(routeCache[callsign], callsign);
-    });
-
-    currentAircraft
-      .filter(p=>normalizeCallsign(p.callsign) === callsign && p.icao24 !== plane.icao24)
-      .forEach(p=>{
-        document.querySelectorAll(`[data-route-for="${p.icao24}"]`).forEach(row=>{
-          row.innerHTML = routeCellHtml(routeCache[callsign], callsign);
-        });
-      });
+    currentAircraft.filter(p=>normalizeCallsign(p.callsign)===callsign).forEach(updateRouteRow);
   }));
 }
 
+function parseCsvLine(line){
+  const values=[];
+  let value="", quoted=false;
+  for(let i=0;i<line.length;i++){
+    const ch=line[i];
+    if(ch==='"'){
+      if(quoted && line[i+1]==='"'){ value+='"'; i++; }
+      else quoted=!quoted;
+    } else if(ch===',' && !quoted){ values.push(value); value=""; }
+    else value+=ch;
+  }
+  values.push(value);
+  return values;
+}
+
+async function loadAirportData(){
+  if(airportDataState.items) return airportDataState.items;
+  if(airportDataState.promise) return airportDataState.promise;
+  airportDataState.promise = (async()=>{
+    const response = await fetch(OURAIRPORTS_URL, {cache:"force-cache"});
+    if(!response.ok) throw new Error(`OurAirports HTTP ${response.status}`);
+    const text = await response.text();
+    const lines = text.split(/\r?\n/);
+    const headers = parseCsvLine(lines[0]);
+    const col = Object.fromEntries(headers.map((name,index)=>[name,index]));
+    const accepted = new Set(["large_airport","medium_airport","small_airport","heliport","seaplane_base"]);
+    const airports=[];
+    for(let i=1;i<lines.length;i++){
+      if(!lines[i]) continue;
+      const row = parseCsvLine(lines[i]);
+      const type = row[col.type];
+      if(!accepted.has(type)) continue;
+      const latitude = Number(row[col.latitude_deg]);
+      const longitude = Number(row[col.longitude_deg]);
+      if(!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
+      airports.push({
+        ident:row[col.ident] || "", type,
+        name:row[col.name] || "Unknown airport", latitude, longitude,
+        elevation_ft:row[col.elevation_ft] || null,
+        iso_country:row[col.iso_country] || "", municipality:row[col.municipality] || "",
+        scheduled_service:row[col.scheduled_service] || "no",
+        gps_code:row[col.gps_code] || "", icao_code:row[col.icao_code] || "",
+        iata_code:row[col.iata_code] || "", local_code:row[col.local_code] || ""
+      });
+      if(i%6000===0) await sleep(0);
+    }
+    airportDataState.items=airports;
+    return airports;
+  })().catch(error=>{
+    airportDataState.error=error;
+    airportDataState.promise=null;
+    throw error;
+  });
+  return airportDataState.promise;
+}
+
+function findNearestAirport(plane, airports){
+  const isRotorcraft = plane.category===8;
+  const allowed = isRotorcraft
+    ? new Set(["large_airport","medium_airport","small_airport","heliport"])
+    : new Set(["large_airport","medium_airport","small_airport"]);
+  const maxMiles = 120;
+  const latWindow = maxMiles/69;
+  const lonWindow = maxMiles/(69*Math.max(.15,Math.cos(toRad(plane.lat))));
+  let bestAirport=null, bestDistance=Infinity;
+  for(const airport of airports){
+    if(!allowed.has(airport.type)) continue;
+    if(Math.abs(airport.latitude-plane.lat)>latWindow || Math.abs(airport.longitude-plane.lon)>lonWindow) continue;
+    const distance = haversineMiles(plane.lat, plane.lon, airport.latitude, airport.longitude);
+    if(distance<bestDistance){ bestDistance=distance; bestAirport=airport; }
+  }
+  if(!bestAirport || bestDistance>maxMiles) return null;
+  return {
+    airport:bestAirport,
+    distance:bestDistance,
+    bearing:bearingDeg(plane.lat, plane.lon, bestAirport.latitude, bestAirport.longitude),
+    referenceLat:plane.lat,
+    referenceLon:plane.lon
+  };
+}
+
+async function enrichAirportProximity(){
+  const targets = currentAircraft.filter(p=>{
+    const callsign = normalizeCallsign(p.callsign);
+    const route = routeCache[callsign];
+    if(route?.origin && route?.destination) return false;
+    return !canLookupRoute(callsign) || route===null || route?.skipped;
+  });
+  if(!targets.length) return;
+
+  const needsRefresh = targets.filter(p=>{
+    const cached = nearestAirportCache[p.icao24];
+    if(!cached || cached.loading || cached.error || cached.referenceLat==null) return true;
+    return haversineMiles(cached.referenceLat, cached.referenceLon, p.lat, p.lon)>3;
+  });
+  if(!needsRefresh.length){ targets.forEach(updateRouteRow); return; }
+
+  needsRefresh.forEach(p=>{ nearestAirportCache[p.icao24]={loading:true}; updateRouteRow(p); });
+  try{
+    const airports = await loadAirportData();
+    needsRefresh.forEach(p=>{
+      nearestAirportCache[p.icao24] = findNearestAirport(p, airports) || {
+        airport:null, referenceLat:p.lat, referenceLon:p.lon
+      };
+      updateRouteRow(p);
+    });
+  } catch(e){
+    needsRefresh.forEach(p=>{
+      nearestAirportCache[p.icao24]={error:true};
+      updateRouteRow(p);
+    });
+  }
+}
 function drawScope(){
   ctx.clearRect(0,0,360,360);
   const cx=180, cy=180, maxR=170;
