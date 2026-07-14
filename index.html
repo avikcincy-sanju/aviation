@@ -117,6 +117,8 @@ canvas{position:absolute;top:0;left:0;}
   padding:14px 16px;border-radius:3px;font-size:13px;
 }
 .strip.emergency{border-left-color:var(--red);background:rgba(255,95,95,0.06);}
+.strip.stale-position:not(.emergency){border-left-color:var(--amber);}
+.strip.outdated-position:not(.emergency){border-left-color:var(--red);background:rgba(255,95,95,0.035);}
 .strip-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--panel-border);}
 .strip .callsign{color:var(--phosphor);font-weight:700;font-size:17px;}
 .strip .sub{color:var(--dim);font-size:11px;margin-top:2px;}
@@ -170,6 +172,9 @@ canvas{position:absolute;top:0;left:0;}
 .badge.ground{background:rgba(92,120,137,0.2);color:var(--dim);}
 .badge.squawk-alert{background:rgba(255,95,95,0.2);color:var(--red);}
 .badge.spi{background:rgba(79,210,255,0.15);color:var(--cyan);}
+.badge.position-stale{background:rgba(255,178,63,0.16);color:var(--amber);}
+.badge.position-outdated{background:rgba(255,95,95,0.18);color:var(--red);}
+.badge.cached-feed{background:rgba(79,210,255,0.12);color:var(--cyan);}
 
 .empty{color:var(--dim);font-size:13px;padding:24px 4px;}
 .note{
@@ -233,7 +238,7 @@ canvas{position:absolute;top:0;left:0;}
   <div id="stripsList"><div class="empty">No aircraft tracked yet.</div></div>
 
   <div class="note">
-    Position data comes from OpenSky Network's free volunteer receiver network, so coverage is best over the US, Europe, and other well-covered regions — a quiet scope can just mean no nearby receiver is reporting, not necessarily an empty sky. Temporary OpenSky or browser-network interruptions are retried automatically with progressively longer pauses, while the most recent successful aircraft data remains visible. Aircraft type, registration, and registered owner come from hexdb.io when available. Scheduled airline origin and destination come from adsbdb.com by matching the callsign; airport names, cities, countries, coordinates, and elevations are shown when supplied. Because airline flight numbers can be reused or route records can be stale, the aircraft's live position is checked against the reported great-circle route corridor. Progress and time remaining appear only when that route is geographically plausible; otherwise the route is clearly marked unverified. Any displayed progress and time remaining are straight-line estimates, not official operational ETAs. When no scheduled route exists—common for private/general-aviation tail numbers—the page loads the public OurAirports dataset and shows the nearest known airport, clearly labeled as proximity only and not a confirmed origin or destination. "Registered in" is the aircraft's registration country, not its departure airport. Squawk 7500/7600/7700 are universal emergency transponder codes, and "ident activated" reflects a pilot pressing the ident button at ATC's request—both shown for awareness, not diagnosis.
+    Position data comes from OpenSky Network's free volunteer receiver network, so coverage is best over the US, Europe, and other well-covered regions — a quiet scope can just mean no nearby receiver is reporting, not necessarily an empty sky. Temporary OpenSky or browser-network interruptions are retried automatically with progressively longer pauses, while the most recent successful aircraft data remains visible. Position ages continue updating every second during an interruption: records become stale after 60 seconds, outdated after 120 seconds, and are removed after five minutes without contact. Aircraft type, registration, and registered owner come from hexdb.io when available. Scheduled airline origin and destination come from adsbdb.com by matching the callsign; airport names, cities, countries, coordinates, and elevations are shown when supplied. Because airline flight numbers can be reused or route records can be stale, the aircraft's live position is checked against the reported great-circle route corridor. Progress and time remaining appear only when that route is geographically plausible; otherwise the route is clearly marked unverified. Any displayed progress and time remaining are straight-line estimates, not official operational ETAs. When no scheduled route exists—common for private/general-aviation tail numbers—the page loads the public OurAirports dataset and shows the nearest known airport, clearly labeled as proximity only and not a confirmed origin or destination. "Registered in" is the aircraft's registration country, not its departure airport. Squawk 7500/7600/7700 are universal emergency transponder codes, and "ident activated" reflects a pilot pressing the ident button at ATC's request—both shown for awareness, not diagnosis.
   </div>
 </div>
 
@@ -267,6 +272,9 @@ let lastSuccessfulScanAt = null;
 const REFRESH_SECONDS = 30;
 const MAX_BACKOFF_SECONDS = 180;
 const REQUEST_TIMEOUT_MS = 12000;
+const STALE_POSITION_SECONDS = 60;
+const OUTDATED_POSITION_SECONDS = 120;
+const REMOVE_POSITION_SECONDS = 300;
 const typeCache = {};
 const routeCache = {};
 const nearestAirportCache = {};
@@ -433,6 +441,7 @@ async function beginScan(){
   countdownTimer = setInterval(()=>{
     secondsToNext = Math.max(0, secondsToNext-1);
     document.getElementById('factRefresh').textContent = secondsToNext+"s";
+    refreshAircraftAges();
   },1000);
   await scanNow();
 }
@@ -476,6 +485,7 @@ async function scanNow(){
     setStatus(currentAircraft.length+" aircraft in range. Last scan "+lastSuccessfulScanAt.toLocaleTimeString()+".");
     renderFacts();
     renderStrips();
+    refreshAircraftAges();
     enrichTypes();
     enrichAirportProximity();
     enrichRoutes().finally(()=>enrichAirportProximity());
@@ -539,6 +549,72 @@ function categoryLabel(n){
   }[n] || "Unknown";
 }
 
+function positionAgeSeconds(plane, nowSec=Date.now()/1000){
+  if(!plane || !plane.lastContact) return null;
+  return Math.max(0, Math.round(nowSec - plane.lastContact));
+}
+
+function formatPositionAge(ageSeconds){
+  if(ageSeconds==null || !Number.isFinite(ageSeconds)) return "—";
+  if(ageSeconds<60) return `${ageSeconds}s ago`;
+  const minutes = Math.floor(ageSeconds/60);
+  const seconds = ageSeconds%60;
+  if(minutes<60) return `${minutes}m ${seconds}s ago`;
+  const hours = Math.floor(minutes/60);
+  const remainingMinutes = minutes%60;
+  return `${hours}h ${remainingMinutes}m ago`;
+}
+
+function positionAgeClass(ageSeconds){
+  if(ageSeconds==null) return "";
+  if(ageSeconds>=OUTDATED_POSITION_SECONDS) return "outdated-position";
+  if(ageSeconds>=STALE_POSITION_SECONDS) return "stale-position";
+  return "";
+}
+
+function positionAgeBadgeHtml(ageSeconds){
+  const cachedBadge = consecutiveScanFailures>0
+    ? '<span class="badge cached-feed">cached feed</span>'
+    : "";
+  if(ageSeconds!=null && ageSeconds>=OUTDATED_POSITION_SECONDS){
+    return '<span class="badge position-outdated">position outdated</span>'+cachedBadge;
+  }
+  if(ageSeconds!=null && ageSeconds>=STALE_POSITION_SECONDS){
+    return '<span class="badge position-stale">stale position</span>'+cachedBadge;
+  }
+  return cachedBadge;
+}
+
+function refreshAircraftAges(){
+  if(!currentAircraft.length) return;
+  const nowSec = Date.now()/1000;
+  const retained = currentAircraft.filter(plane=>{
+    const age = positionAgeSeconds(plane, nowSec);
+    return age==null || age<REMOVE_POSITION_SECONDS;
+  });
+
+  if(retained.length!==currentAircraft.length){
+    currentAircraft = retained;
+    renderFacts();
+    renderStrips();
+    return;
+  }
+
+  currentAircraft.forEach(plane=>{
+    const age = positionAgeSeconds(plane, nowSec);
+    document.querySelectorAll(`[data-age-for="${plane.icao24}"]`).forEach(element=>{
+      element.textContent = formatPositionAge(age);
+    });
+    document.querySelectorAll(`[data-age-badge-for="${plane.icao24}"]`).forEach(element=>{
+      element.innerHTML = positionAgeBadgeHtml(age);
+    });
+    document.querySelectorAll(`.strip[data-icao="${plane.icao24}"]`).forEach(card=>{
+      card.classList.toggle("stale-position", age!=null && age>=STALE_POSITION_SECONDS && age<OUTDATED_POSITION_SECONDS);
+      card.classList.toggle("outdated-position", age!=null && age>=OUTDATED_POSITION_SECONDS);
+    });
+  });
+}
+
 function renderStrips(){
   const list = document.getElementById('stripsList');
   if(currentAircraft.length===0){
@@ -553,7 +629,9 @@ function renderStrips(){
     const spdMph = p.velocity!=null ? Math.round(p.velocity*2.237)+" mph" : "—";
     const verticalFpm = p.vRate!=null ? Math.round(p.vRate*196.8504) : null;
     const verticalText = verticalFpm==null ? "—" : `${verticalFpm>0?"+":""}${verticalFpm.toLocaleString()} ft/min`;
-    const dataAge = p.lastContact ? Math.max(0, Math.round(nowSec - p.lastContact))+"s ago" : "—";
+    const ageSeconds = positionAgeSeconds(p, nowSec);
+    const dataAge = formatPositionAge(ageSeconds);
+    const ageClass = positionAgeClass(ageSeconds);
     const coordinates = `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`;
 
     let trendBadge = '<span class="badge level">level</span>';
@@ -565,7 +643,7 @@ function renderStrips(){
 
     const typeInfo = typeCache[p.icao24];
     const callsign = escapeHtml(p.callsign);
-    return `<div class="strip ${emergency?'emergency':''}" data-icao="${p.icao24}">
+    return `<div class="strip ${emergency?'emergency':''} ${ageClass}" data-icao="${p.icao24}">
       <div class="strip-head">
         <div><div class="callsign">${callsign}</div><div class="sub">${p.icao24.toUpperCase()}</div></div>
         <div class="airline-block">
@@ -589,9 +667,9 @@ function renderStrips(){
         <div class="stat"><span class="k">Coordinates</span><span class="v">${coordinates}</span></div>
         <div class="stat"><span class="k">Squawk</span><span class="v">${escapeHtml(p.squawk||"—")}</span></div>
         <div class="stat"><span class="k">Position source</span><span class="v">${posSourceLabel(p.posSource)}</span></div>
-        <div class="stat"><span class="k">Last updated</span><span class="v">${dataAge}</span></div>
+        <div class="stat"><span class="k">Last updated</span><span class="v" data-age-for="${p.icao24}">${dataAge}</span></div>
       </div>
-      <div class="badges-row">${trendBadge}${squawkBadge}${spiBadge}</div>
+      <div class="badges-row"><span data-age-badge-for="${p.icao24}">${positionAgeBadgeHtml(ageSeconds)}</span>${trendBadge}${squawkBadge}${spiBadge}</div>
     </div>`;
   }).join('');
 }
