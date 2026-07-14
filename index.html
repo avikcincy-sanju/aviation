@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AIRSPACE — local flight scope</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root{
+  --bg:#070b10;
+  --scope:#0c1720;
+  --ring:#1a3542;
+  --phosphor:#3be28a;
+  --phosphor-dim:#1c6b48;
+  --amber:#ffb23f;
+  --red:#ff5f5f;
+  --cyan:#4fd2ff;
+  --text:#d9e6ec;
+  --dim:#5c7889;
+  --panel:#0e1922;
+  --panel-border:#1b323f;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:'JetBrains Mono',monospace;
+  min-height:100vh;
+}
+.wrap{
+  max-width:1080px;
+  margin:0 auto;
+  padding:32px 20px 60px;
+}
+.title-row{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-bottom:4px;
+}
+h1{
+  font-family:'Chakra Petch',sans-serif;
+  font-weight:700;
+  font-size:28px;
+  letter-spacing:3px;
+  margin:0;
+  color:var(--phosphor);
+  text-shadow:0 0 14px rgba(59,226,138,0.35);
+}
+.subtitle{font-size:12px;color:var(--dim);letter-spacing:1px;}
+.clock{font-size:12px;color:var(--cyan);letter-spacing:1px;}
+
+.controls{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  align-items:center;
+  background:var(--panel);
+  border:1px solid var(--panel-border);
+  border-radius:4px;
+  padding:14px 16px;
+  margin:20px 0 24px;
+}
+.controls label{
+  font-size:11px;color:var(--dim);letter-spacing:1px;
+  text-transform:uppercase;display:block;margin-bottom:4px;
+}
+.field{display:flex;flex-direction:column;}
+input[type=text]{
+  background:#081019;border:1px solid var(--panel-border);color:var(--phosphor);
+  font-family:'JetBrains Mono',monospace;font-size:14px;padding:8px 10px;
+  border-radius:3px;width:130px;outline:none;
+}
+input[type=text]:focus{border-color:var(--phosphor-dim);box-shadow:0 0 0 2px rgba(59,226,138,0.15);}
+.or{color:var(--dim);font-size:11px;align-self:center;padding-top:16px;}
+button{
+  background:transparent;border:1px solid var(--phosphor-dim);color:var(--phosphor);
+  font-family:'Chakra Petch',sans-serif;font-weight:600;letter-spacing:1px;font-size:13px;
+  padding:9px 18px;border-radius:3px;cursor:pointer;align-self:flex-end;transition:background 0.15s;
+}
+button:hover{background:rgba(59,226,138,0.1);}
+button:active{transform:scale(0.98);}
+.radius-field{display:flex;flex-direction:column;min-width:150px;}
+input[type=range]{accent-color:var(--phosphor);width:150px;}
+.status-line{font-size:12px;color:var(--dim);min-height:18px;margin:-8px 0 18px;}
+.status-line.err{color:var(--amber);}
+
+.scope-row{display:flex;gap:24px;flex-wrap:wrap;}
+.scope-box{
+  position:relative;width:360px;height:360px;border-radius:50%;
+  background:radial-gradient(circle, var(--scope) 0%, #081019 100%);
+  border:1px solid var(--ring);flex-shrink:0;overflow:hidden;
+}
+canvas{position:absolute;top:0;left:0;}
+
+.facts{flex:1;min-width:260px;display:flex;flex-direction:column;gap:10px;}
+.fact-card{
+  background:var(--panel);border:1px solid var(--panel-border);border-radius:4px;
+  padding:10px 14px;display:flex;justify-content:space-between;align-items:center;
+}
+.fact-card .k{font-size:11px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;}
+.fact-card .v{font-size:15px;color:var(--phosphor);font-weight:500;}
+
+.strips-header{
+  margin-top:32px;font-family:'Chakra Petch',sans-serif;font-size:13px;letter-spacing:2px;
+  color:var(--dim);text-transform:uppercase;border-bottom:1px solid var(--panel-border);padding-bottom:8px;
+}
+.strip{
+  display:grid;grid-template-columns:110px 1fr 90px 90px 90px 100px;gap:10px;align-items:center;
+  background:var(--panel);border:1px solid var(--panel-border);border-left:3px solid var(--phosphor-dim);
+  padding:12px 14px;margin-top:8px;border-radius:3px;font-size:13px;
+}
+.strip.emergency{border-left-color:var(--red);background:rgba(255,95,95,0.06);}
+.strip .callsign{color:var(--phosphor);font-weight:700;font-size:15px;}
+.strip .sub{color:var(--dim);font-size:11px;margin-top:2px;}
+.strip .num{color:var(--text);}
+.strip .num .u{color:var(--dim);font-size:10px;margin-left:3px;}
+.strip .badge{font-size:10px;letter-spacing:1px;padding:3px 6px;border-radius:3px;display:inline-block;text-align:center;}
+.badge.climb{background:rgba(59,226,138,0.15);color:var(--phosphor);}
+.badge.desc{background:rgba(255,178,63,0.15);color:var(--amber);}
+.badge.level{background:rgba(92,120,137,0.2);color:var(--dim);}
+.badge.ground{background:rgba(92,120,137,0.2);color:var(--dim);}
+.badge.squawk-alert{background:rgba(255,95,95,0.2);color:var(--red);}
+.type-cell{color:var(--dim);font-size:11px;}
+
+.empty{color:var(--dim);font-size:13px;padding:24px 4px;}
+.note{
+  margin-top:28px;font-size:11px;color:var(--dim);line-height:1.6;
+  border-top:1px solid var(--panel-border);padding-top:14px;
+}
+@media (max-width:720px){
+  .strip{grid-template-columns:1fr 1fr;grid-auto-rows:auto;}
+  .scope-box{width:280px;height:280px;}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="title-row">
+    <h1>AIRSPACE</h1>
+    <div class="clock" id="clock">--:--:--</div>
+  </div>
+  <div class="subtitle">local aircraft scope — OpenSky Network + hexdb.io (100% free, no keys)</div>
+
+  <div class="controls">
+    <div class="field">
+      <label for="zip">ZIP code</label>
+      <input type="text" id="zip" placeholder="45044" inputmode="numeric">
+    </div>
+    <div class="or">or</div>
+    <div class="field">
+      <label for="lat">Latitude</label>
+      <input type="text" id="lat" placeholder="39.4419">
+    </div>
+    <div class="field">
+      <label for="lon">Longitude</label>
+      <input type="text" id="lon" placeholder="-84.3927">
+    </div>
+    <div class="radius-field">
+      <label for="radius">Radius: <span id="radiusVal">15</span> mi</label>
+      <input type="range" id="radius" min="3" max="60" value="15" step="1">
+    </div>
+    <button id="scanBtn">Scan airspace</button>
+  </div>
+  <div class="status-line" id="status">Enter a ZIP code or coordinates to begin.</div>
+
+  <div class="scope-row">
+    <div class="scope-box">
+      <canvas id="scope" width="360" height="360"></canvas>
+    </div>
+    <div class="facts" id="facts">
+      <div class="fact-card"><span class="k">Aircraft in range</span><span class="v" id="factCount">0</span></div>
+      <div class="fact-card"><span class="k">Closest</span><span class="v" id="factClosest">—</span></div>
+      <div class="fact-card"><span class="k">Highest</span><span class="v" id="factHighest">—</span></div>
+      <div class="fact-card"><span class="k">Fastest</span><span class="v" id="factFastest">—</span></div>
+      <div class="fact-card"><span class="k">Next scan</span><span class="v" id="factRefresh">—</span></div>
+    </div>
+  </div>
+
+  <div class="strips-header">Flight strips</div>
+  <div id="stripsList"><div class="empty">No aircraft tracked yet.</div></div>
+
+  <div class="note">
+    Position data comes from OpenSky Network's free volunteer receiver network, so coverage is best over the US, Europe, and other well-covered regions — a quiet scope can just mean no nearby receiver is reporting, not necessarily an empty sky. Aircraft type/registration comes from hexdb.io when available. "Registered in" is the aircraft's country of registration, not its flight's origin airport — full departure/arrival route data needs a paid API (e.g. FlightAware AeroAPI), since the free route APIs that exist don't support HTTPS and can't be called safely from a page hosted on GitHub Pages. Squawk 7500/7600/7700 are real universal emergency transponder codes (hijack / radio failure / general emergency) shown here for awareness, not diagnosis.
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script>
+const AIRLINES = {
+  AAL:"American Airlines", DAL:"Delta Air Lines", UAL:"United Airlines", SWA:"Southwest Airlines",
+  JBU:"JetBlue Airways", ASA:"Alaska Airlines", FFT:"Frontier Airlines", NKS:"Spirit Airlines",
+  SKW:"SkyWest Airlines", RPA:"Republic Airways", ENY:"Envoy Air", EDV:"Endeavor Air",
+  ACA:"Air Canada", WJA:"WestJet", BAW:"British Airways", VIR:"Virgin Atlantic",
+  DLH:"Lufthansa", AFR:"Air France", KLM:"KLM Royal Dutch Airlines", IBE:"Iberia",
+  UAE:"Emirates", QTR:"Qatar Airways", ETD:"Etihad Airways", SVA:"Saudia",
+  SIA:"Singapore Airlines", CPA:"Cathay Pacific", ANA:"All Nippon Airways", JAL:"Japan Airlines",
+  KAL:"Korean Air", THY:"Turkish Airlines", RYR:"Ryanair", EZY:"easyJet",
+  WZZ:"Wizz Air", VLG:"Vueling", AZA:"ITA Airways", SAS:"Scandinavian Airlines",
+  FDX:"FedEx Express", UPS:"UPS Airlines", GTI:"Atlas Air", ABX:"ABX Air",
+  AAY:"Allegiant Air", HAL:"Hawaiian Airlines", QXE:"Horizon Air", GJS:"GoJet Airlines",
+  LAN:"LATAM Airlines", AVA:"Avianca", AMX:"Aeromexico", CMP:"Copa Airlines",
+  QFA:"Qantas", JST:"Jetstar", VOZ:"Virgin Australia", NZ:"Air New Zealand"
+};
+
+const CFG = window.AIRSPACE_CONFIG || {};
+const LS_KEYS = { zip:"airspace_zip", lat:"airspace_lat", lon:"airspace_lon", radius:"airspace_radius" };
+
+let userLat = null, userLon = null;
+let radiusMiles = CFG.defaultRadiusMiles || 15;
+let refreshTimer = null, countdownTimer = null, secondsToNext = 0;
+const REFRESH_SECONDS = 20;
+const typeCache = {};
+
+const statusEl = document.getElementById('status');
+const canvas = document.getElementById('scope');
+const ctx = canvas.getContext('2d');
+let sweepAngle = 0;
+let currentAircraft = [];
+
+function loadDefaults(){
+  const savedZip = localStorage.getItem(LS_KEYS.zip);
+  const savedLat = localStorage.getItem(LS_KEYS.lat);
+  const savedLon = localStorage.getItem(LS_KEYS.lon);
+  const savedRadius = localStorage.getItem(LS_KEYS.radius);
+
+  if(CFG.defaultLat != null && CFG.defaultLon != null){
+    document.getElementById('lat').value = CFG.defaultLat;
+    document.getElementById('lon').value = CFG.defaultLon;
+  } else if(CFG.defaultZip){
+    document.getElementById('zip').value = CFG.defaultZip;
+  } else if(savedLat && savedLon){
+    document.getElementById('lat').value = savedLat;
+    document.getElementById('lon').value = savedLon;
+  } else if(savedZip){
+    document.getElementById('zip').value = savedZip;
+  }
+
+  radiusMiles = parseInt(savedRadius || radiusMiles, 10);
+  document.getElementById('radius').value = radiusMiles;
+  document.getElementById('radiusVal').textContent = radiusMiles;
+}
+
+document.getElementById('radius').addEventListener('input', e=>{
+  radiusMiles = parseInt(e.target.value,10);
+  document.getElementById('radiusVal').textContent = radiusMiles;
+});
+document.getElementById('scanBtn').addEventListener('click', beginScan);
+
+function setStatus(msg, isErr){
+  statusEl.textContent = msg;
+  statusEl.classList.toggle('err', !!isErr);
+}
+function toRad(d){return d*Math.PI/180;}
+function toDeg(r){return r*180/Math.PI;}
+function haversineMiles(lat1,lon1,lat2,lon2){
+  const R=3958.8;
+  const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
+  const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+function bearingDeg(lat1,lon1,lat2,lon2){
+  const y=Math.sin(toRad(lon2-lon1))*Math.cos(toRad(lat2));
+  const x=Math.cos(toRad(lat1))*Math.sin(toRad(lat2)) - Math.sin(toRad(lat1))*Math.cos(toRad(lat2))*Math.cos(toRad(lon2-lon1));
+  return (toDeg(Math.atan2(y,x))+360)%360;
+}
+function compass(deg){
+  const dirs=["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+  return dirs[Math.round(deg/22.5)%16];
+}
+
+async function beginScan(){
+  const zip = document.getElementById('zip').value.trim();
+  const latInput = document.getElementById('lat').value.trim();
+  const lonInput = document.getElementById('lon').value.trim();
+
+  clearInterval(refreshTimer); clearInterval(countdownTimer);
+
+  try{
+    if(latInput && lonInput){
+      userLat = parseFloat(latInput);
+      userLon = parseFloat(lonInput);
+      if(isNaN(userLat) || isNaN(userLon)) throw new Error("Coordinates aren't valid numbers.");
+      localStorage.setItem(LS_KEYS.lat, userLat);
+      localStorage.setItem(LS_KEYS.lon, userLon);
+      localStorage.removeItem(LS_KEYS.zip);
+    } else if(zip){
+      setStatus("Looking up ZIP code "+zip+"...");
+      const geo = await fetch(`https://api.zippopotam.us/us/${encodeURIComponent(zip)}`);
+      if(!geo.ok) throw new Error("Couldn't find that ZIP code (US only). Try entering coordinates instead.");
+      const gj = await geo.json();
+      userLat = parseFloat(gj.places[0].latitude);
+      userLon = parseFloat(gj.places[0].longitude);
+      document.getElementById('lat').value = userLat.toFixed(4);
+      document.getElementById('lon').value = userLon.toFixed(4);
+      localStorage.setItem(LS_KEYS.zip, zip);
+    } else {
+      throw new Error("Enter a ZIP code or coordinates first.");
+    }
+  } catch(e){
+    setStatus(e.message, true);
+    return;
+  }
+
+  localStorage.setItem(LS_KEYS.radius, radiusMiles);
+  await scanNow();
+  refreshTimer = setInterval(scanNow, REFRESH_SECONDS*1000);
+  secondsToNext = REFRESH_SECONDS;
+  countdownTimer = setInterval(()=>{
+    secondsToNext--;
+    if(secondsToNext<0) secondsToNext = REFRESH_SECONDS;
+    document.getElementById('factRefresh').textContent = secondsToNext+"s";
+  },1000);
+}
+
+async function scanNow(){
+  secondsToNext = REFRESH_SECONDS;
+  setStatus("Scanning "+radiusMiles+" mi around "+userLat.toFixed(3)+", "+userLon.toFixed(3)+"...");
+  const latDelta = radiusMiles/69;
+  const lonDelta = radiusMiles/(69*Math.max(0.15,Math.cos(toRad(userLat))));
+  const lamin=userLat-latDelta, lamax=userLat+latDelta;
+  const lomin=userLon-lonDelta, lomax=userLon+lonDelta;
+
+  try{
+    const url = `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
+    const res = await fetch(url);
+    if(!res.ok) throw new Error("OpenSky returned an error ("+res.status+"). Its free tier is rate-limited — wait a bit and try again.");
+    const data = await res.json();
+    const states = data.states || [];
+
+    const planes = states.map(s=>({
+      icao24:s[0], callsign:(s[1]||"").trim()||"—", regCountry:s[2],
+      lon:s[5], lat:s[6], baroAlt:s[7], onGround:s[8], velocity:s[9],
+      track:s[10], vRate:s[11], squawk:s[14]
+    })).filter(p=>p.lat!=null && p.lon!=null);
+
+    planes.forEach(p=>{
+      p.distance = haversineMiles(userLat,userLon,p.lat,p.lon);
+      p.bearing = bearingDeg(userLat,userLon,p.lat,p.lon);
+    });
+    currentAircraft = planes.filter(p=>p.distance<=radiusMiles).sort((a,b)=>a.distance-b.distance);
+
+    setStatus(currentAircraft.length+" aircraft in range. Last scan "+new Date().toLocaleTimeString()+".");
+    renderFacts();
+    renderStrips();
+    enrichTypes();
+  } catch(e){
+    setStatus("Live feed unavailable: "+e.message+" (Free public APIs sometimes rate-limit or block direct browser requests — this runs more reliably with your own ADS-B receiver feeding the page server-side.)", true);
+  }
+}
+
+function renderFacts(){
+  document.getElementById('factCount').textContent = currentAircraft.length;
+  if(currentAircraft.length===0){
+    document.getElementById('factClosest').textContent="—";
+    document.getElementById('factHighest').textContent="—";
+    document.getElementById('factFastest').textContent="—";
+    return;
+  }
+  const closest = currentAircraft[0];
+  const highest = [...currentAircraft].sort((a,b)=>(b.baroAlt||0)-(a.baroAlt||0))[0];
+  const fastest = [...currentAircraft].sort((a,b)=>(b.velocity||0)-(a.velocity||0))[0];
+  document.getElementById('factClosest').textContent = closest.callsign+" ("+closest.distance.toFixed(1)+" mi)";
+  document.getElementById('factHighest').textContent = highest.baroAlt ? highest.callsign+" ("+Math.round(highest.baroAlt*3.281).toLocaleString()+" ft)" : "—";
+  document.getElementById('factFastest').textContent = fastest.velocity ? fastest.callsign+" ("+Math.round(fastest.velocity*2.237)+" mph)" : "—";
+}
+
+function airlineName(callsign){
+  const prefix = callsign.slice(0,3).toUpperCase();
+  if(AIRLINES[prefix]) return AIRLINES[prefix];
+  if(/^N[0-9]/.test(callsign)) return "Private / general aviation";
+  return "Unknown operator";
+}
+
+function renderStrips(){
+  const list = document.getElementById('stripsList');
+  if(currentAircraft.length===0){
+    list.innerHTML = '<div class="empty">No aircraft currently within range. Try a larger radius or check back — coverage depends on nearby volunteer receivers.</div>';
+    return;
+  }
+  list.innerHTML = currentAircraft.map(p=>{
+    const emergency = ["7500","7600","7700"].includes(p.squawk);
+    const altFt = p.baroAlt!=null ? Math.round(p.baroAlt*3.281).toLocaleString()+" ft" : "—";
+    const spdMph = p.velocity!=null ? Math.round(p.velocity*2.237)+" mph" : "—";
+    let trendBadge = '<span class="badge level">level</span>';
+    if(p.onGround) trendBadge = '<span class="badge ground">ground</span>';
+    else if(p.vRate>1) trendBadge = '<span class="badge climb">climbing</span>';
+    else if(p.vRate<-1) trendBadge = '<span class="badge desc">descending</span>';
+    const squawkBadge = emergency ? `<span class="badge squawk-alert">squawk ${p.squawk}</span>` : (p.squawk ? `<span style="color:var(--dim);font-size:11px;">sq ${p.squawk}</span>` : "");
+    const typeInfo = typeCache[p.icao24];
+    return `<div class="strip ${emergency?'emergency':''}" data-icao="${p.icao24}">
+      <div><div class="callsign">${p.callsign}</div><div class="sub">${p.icao24.toUpperCase()}</div></div>
+      <div><div>${airlineName(p.callsign)}</div><div class="sub">registered in ${p.regCountry||"unknown"}</div>
+        <div class="type-cell" data-type-for="${p.icao24}">${typeInfo ? typeInfo : "looking up aircraft type…"}</div></div>
+      <div class="num">${p.distance.toFixed(1)}<span class="u">mi</span><div class="sub">${compass(p.bearing)}</div></div>
+      <div class="num">${altFt}<div class="sub">altitude</div></div>
+      <div class="num">${spdMph}<div class="sub">ground speed</div></div>
+      <div>${trendBadge}${squawkBadge?'<br>'+squawkBadge:''}</div>
+    </div>`;
+  }).join('');
+}
+
+async function enrichTypes(){
+  const targets = currentAircraft.slice(0,8).filter(p=>!typeCache[p.icao24]);
+  await Promise.all(targets.map(async p=>{
+    try{
+      const res = await fetch(`https://hexdb.io/api/v1/aircraft/${p.icao24}`);
+      if(!res.ok) return;
+      const j = await res.json();
+      const label = [j.Manufacturer, j.Type].filter(Boolean).join(" ") || null;
+      typeCache[p.icao24] = label ? label + (j.Registration ? " · "+j.Registration : "") : "type unknown";
+    } catch(e){
+      typeCache[p.icao24] = "type unknown";
+    }
+    const cell = document.querySelector(`[data-type-for="${p.icao24}"]`);
+    if(cell) cell.textContent = typeCache[p.icao24];
+  }));
+}
+
+function drawScope(){
+  ctx.clearRect(0,0,360,360);
+  const cx=180, cy=180, maxR=170;
+  ctx.strokeStyle = 'rgba(26,53,66,0.9)';
+  ctx.lineWidth = 1;
+  for(let i=1;i<=4;i++){ ctx.beginPath(); ctx.arc(cx,cy,maxR*i/4,0,Math.PI*2); ctx.stroke(); }
+  ctx.beginPath();
+  ctx.moveTo(cx,cy-maxR); ctx.lineTo(cx,cy+maxR);
+  ctx.moveTo(cx-maxR,cy); ctx.lineTo(cx+maxR,cy);
+  ctx.stroke();
+
+  ctx.fillStyle = 'rgba(92,120,137,0.7)';
+  ctx.font = '9px JetBrains Mono';
+  for(let i=1;i<=4;i++){
+    ctx.fillText(Math.round(radiusMiles*i/4)+"mi", cx+4, cy-maxR*i/4+10);
+  }
+
+  const sweepRad = toRad(sweepAngle-90);
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(cx,cy);
+  ctx.arc(cx,cy,maxR, sweepRad-0.6, sweepRad, false);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(59,226,138,0.12)';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(cx,cy);
+  ctx.lineTo(cx+maxR*Math.cos(sweepRad), cy+maxR*Math.sin(sweepRad));
+  ctx.strokeStyle = 'rgba(59,226,138,0.7)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+
+  currentAircraft.forEach(p=>{
+    const r = Math.min(p.distance/radiusMiles,1)*maxR;
+    const ang = toRad(p.bearing-90);
+    const x = cx + r*Math.cos(ang);
+    const y = cy + r*Math.sin(ang);
+    const emergency = ["7500","7600","7700"].includes(p.squawk);
+    ctx.beginPath();
+    ctx.arc(x,y,emergency?4:3,0,Math.PI*2);
+    ctx.fillStyle = emergency ? '#ff5f5f' : '#3be28a';
+    ctx.fill();
+    if(emergency){
+      ctx.beginPath(); ctx.arc(x,y,7,0,Math.PI*2);
+      ctx.strokeStyle='rgba(255,95,95,0.6)'; ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(217,230,236,0.85)';
+    ctx.font = '9px JetBrains Mono';
+    ctx.fillText(p.callsign, x+6, y-4);
+  });
+
+  ctx.beginPath(); ctx.arc(cx,cy,3,0,Math.PI*2);
+  ctx.fillStyle = '#4fd2ff'; ctx.fill();
+}
+
+function animate(){
+  sweepAngle = (sweepAngle+0.6)%360;
+  drawScope();
+  requestAnimationFrame(animate);
+}
+animate();
+
+function tickClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }
+setInterval(tickClock,1000);
+tickClock();
+
+loadDefaults();
+if(CFG.autoScanOnLoad && (CFG.defaultZip || (CFG.defaultLat!=null && CFG.defaultLon!=null) || localStorage.getItem(LS_KEYS.zip) || localStorage.getItem(LS_KEYS.lat))){
+  beginScan();
+}
+</script>
+</body>
+</html>
