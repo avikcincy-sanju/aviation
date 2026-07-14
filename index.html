@@ -238,7 +238,7 @@ canvas{position:absolute;top:0;left:0;}
   <div id="stripsList"><div class="empty">No aircraft tracked yet.</div></div>
 
   <div class="note">
-    Position data comes from OpenSky Network's free volunteer receiver network, so coverage is best over the US, Europe, and other well-covered regions — a quiet scope can just mean no nearby receiver is reporting, not necessarily an empty sky. Temporary OpenSky or browser-network interruptions are retried automatically with progressively longer pauses, while the most recent successful aircraft data remains visible. Position ages continue updating every second during an interruption: records become stale after 60 seconds, outdated after 120 seconds, and are removed after five minutes without contact. Aircraft type, registration, and registered owner come from hexdb.io when available. Scheduled airline origin and destination come from adsbdb.com by matching the callsign; airport names, cities, countries, coordinates, and elevations are shown when supplied. Because airline flight numbers can be reused or route records can be stale, the aircraft's live position is checked against the reported great-circle route corridor. Progress and time remaining appear only when that route is geographically plausible; otherwise the route is clearly marked unverified. Any displayed progress and time remaining are straight-line estimates, not official operational ETAs. When no scheduled route exists—common for private/general-aviation tail numbers—the page loads the public OurAirports dataset and shows the nearest known airport, clearly labeled as proximity only and not a confirmed origin or destination. "Registered in" is the aircraft's registration country, not its departure airport. Squawk 7500/7600/7700 are universal emergency transponder codes, and "ident activated" reflects a pilot pressing the ident button at ATC's request—both shown for awareness, not diagnosis.
+    Position data comes from OpenSky Network's free volunteer receiver network, so coverage is best over the US, Europe, and other well-covered regions — a quiet scope can just mean no nearby receiver is reporting, not necessarily an empty sky. Temporary OpenSky or browser-network interruptions are retried automatically with progressively longer pauses, while the most recent successful aircraft data remains visible. Position ages continue updating every second during an interruption: records become stale after 60 seconds, outdated after 120 seconds, and are removed after five minutes without contact. Outdated positions remain visible on their cards for context, but are excluded from the live count, closest/highest/fastest summaries, and radar dots. Aircraft type, registration, and registered owner come from hexdb.io when available. Scheduled airline origin and destination come from adsbdb.com by matching the callsign; airport names, cities, countries, coordinates, and elevations are shown when supplied. Because airline flight numbers can be reused or route records can be stale, the aircraft's live position is checked against the reported great-circle route corridor. Progress and time remaining appear only when that route is geographically plausible; otherwise the route is clearly marked unverified. Any displayed progress and time remaining are straight-line estimates, not official operational ETAs. When no scheduled route exists—common for private/general-aviation tail numbers—the page loads the public OurAirports dataset and shows the nearest known airport, clearly labeled as proximity only and not a confirmed origin or destination. "Registered in" is the aircraft's registration country, not its departure airport. Squawk 7500/7600/7700 are universal emergency transponder codes, and "ident activated" reflects a pilot pressing the ident button at ATC's request—both shown for awareness, not diagnosis.
   </div>
 </div>
 
@@ -478,11 +478,24 @@ async function scanNow(){
       p.distance = haversineMiles(userLat,userLon,p.lat,p.lon);
       p.bearing = bearingDeg(userLat,userLon,p.lat,p.lon);
     });
-    currentAircraft = planes.filter(p=>p.distance<=radiusMiles).sort((a,b)=>a.distance-b.distance);
+    const receivedAtSec = Date.now()/1000;
+    currentAircraft = planes
+      .filter(p=>{
+        const age = positionAgeSeconds(p, receivedAtSec);
+        return p.distance<=radiusMiles && (age==null || age<REMOVE_POSITION_SECONDS);
+      })
+      .sort((a,b)=>a.distance-b.distance);
 
     lastSuccessfulScanAt = new Date();
     consecutiveScanFailures = 0;
-    setStatus(currentAircraft.length+" aircraft in range. Last scan "+lastSuccessfulScanAt.toLocaleTimeString()+".");
+    const summary = aircraftSummaryGroups();
+    const outdatedText = summary.outdated.length
+      ? ` · ${summary.outdated.length} outdated position${summary.outdated.length===1?"":"s"} retained`
+      : "";
+    setStatus(
+      `${summary.live.length} live aircraft in range${outdatedText}. `+
+      `Last successful fetch ${lastSuccessfulScanAt.toLocaleTimeString()}.`
+    );
     renderFacts();
     renderStrips();
     refreshAircraftAges();
@@ -497,7 +510,7 @@ async function scanNow(){
       REFRESH_SECONDS * Math.pow(2, Math.min(consecutiveScanFailures, 3))
     );
     const previousData = lastSuccessfulScanAt
-      ? " Showing the last successful aircraft data from "+lastSuccessfulScanAt.toLocaleTimeString()+"."
+      ? " Showing cached aircraft data from the last successful fetch at "+lastSuccessfulScanAt.toLocaleTimeString()+"."
       : " No live aircraft data has been received yet.";
     setStatus(
       "Temporary live-feed interruption: "+describeFetchFailure(e)+"."+
@@ -511,16 +524,22 @@ async function scanNow(){
 }
 
 function renderFacts(){
-  document.getElementById('factCount').textContent = currentAircraft.length;
-  if(currentAircraft.length===0){
+  const {live, outdated} = aircraftSummaryGroups();
+  const countText = outdated.length
+    ? `${live.length} live · ${outdated.length} outdated`
+    : `${live.length} live`;
+  document.getElementById('factCount').textContent = countText;
+
+  if(live.length===0){
     document.getElementById('factClosest').textContent="—";
     document.getElementById('factHighest').textContent="—";
     document.getElementById('factFastest').textContent="—";
     return;
   }
-  const closest = currentAircraft[0];
-  const highest = [...currentAircraft].sort((a,b)=>(b.baroAlt||0)-(a.baroAlt||0))[0];
-  const fastest = [...currentAircraft].sort((a,b)=>(b.velocity||0)-(a.velocity||0))[0];
+
+  const closest = [...live].sort((a,b)=>a.distance-b.distance)[0];
+  const highest = [...live].sort((a,b)=>(b.baroAlt||0)-(a.baroAlt||0))[0];
+  const fastest = [...live].sort((a,b)=>(b.velocity||0)-(a.velocity||0))[0];
   document.getElementById('factClosest').textContent = closest.callsign+" ("+closest.distance.toFixed(1)+" mi)";
   document.getElementById('factHighest').textContent = highest.baroAlt ? highest.callsign+" ("+Math.round(highest.baroAlt*3.281).toLocaleString()+" ft)" : "—";
   document.getElementById('factFastest').textContent = fastest.velocity ? fastest.callsign+" ("+Math.round(fastest.velocity*2.237)+" mph)" : "—";
@@ -572,6 +591,19 @@ function positionAgeClass(ageSeconds){
   return "";
 }
 
+function aircraftSummaryGroups(nowSec=Date.now()/1000){
+  const live = [];
+  const outdated = [];
+  currentAircraft.forEach(plane=>{
+    const age = positionAgeSeconds(plane, nowSec);
+    // Positions under two minutes old remain eligible for the live summary.
+    // This intentionally includes the 60–119 second "stale" window.
+    if(age==null || age<OUTDATED_POSITION_SECONDS) live.push(plane);
+    else outdated.push(plane);
+  });
+  return {live, outdated};
+}
+
 function positionAgeBadgeHtml(ageSeconds){
   const cachedBadge = consecutiveScanFailures>0
     ? '<span class="badge cached-feed">cached feed</span>'
@@ -613,6 +645,10 @@ function refreshAircraftAges(){
       card.classList.toggle("outdated-position", age!=null && age>=OUTDATED_POSITION_SECONDS);
     });
   });
+
+  // Recalculate live counts and leader statistics as positions cross the
+  // stale/outdated thresholds, even when no new OpenSky fetch succeeds.
+  renderFacts();
 }
 
 function renderStrips(){
@@ -1137,7 +1173,8 @@ function drawScope(){
   ctx.stroke();
   ctx.restore();
 
-  currentAircraft.forEach(p=>{
+  const radarAircraft = aircraftSummaryGroups().live;
+  radarAircraft.forEach(p=>{
     const r = Math.min(p.distance/radiusMiles,1)*maxR;
     const ang = toRad(p.bearing-90);
     const x = cx + r*Math.cos(ang);
