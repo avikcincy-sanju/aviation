@@ -197,7 +197,7 @@ canvas{position:absolute;top:0;left:0;}
     <h1>AIRSPACE</h1>
     <div class="clock" id="clock">--:--:--</div>
   </div>
-  <div class="subtitle">local aircraft scope — OpenSky Network + hexdb.io + adsbdb.com (100% free, no keys)</div>
+  <div class="subtitle">local aircraft scope — Airplanes.live + OpenSky Network + hexdb.io + adsbdb.com (100% free, no keys)</div>
 
   <div class="controls">
     <div class="field">
@@ -238,7 +238,7 @@ canvas{position:absolute;top:0;left:0;}
   <div id="stripsList"><div class="empty">No aircraft tracked yet.</div></div>
 
   <div class="note">
-    Position data comes from OpenSky Network's free volunteer receiver network, so coverage is best over the US, Europe, and other well-covered regions — a quiet scope can just mean no nearby receiver is reporting, not necessarily an empty sky. Temporary OpenSky or browser-network interruptions are retried automatically with progressively longer pauses, while the most recent successful aircraft data remains visible. Position ages continue updating every second during an interruption: records become stale after 60 seconds, outdated after 120 seconds, and are removed after five minutes without contact. Outdated positions remain visible on their cards for context, but are excluded from the live count, closest/highest/fastest summaries, and radar dots. Aircraft type, registration, and registered owner come from hexdb.io when available. Scheduled airline origin and destination come from adsbdb.com by matching the callsign; airport names, cities, countries, coordinates, and elevations are shown when supplied. Because airline flight numbers can be reused or route records can be stale, the aircraft's live position is checked against the reported great-circle route corridor. Progress and time remaining appear only when that route is geographically plausible; otherwise the route is clearly marked unverified. Any displayed progress and time remaining are straight-line estimates, not official operational ETAs. When no scheduled route exists—common for private/general-aviation tail numbers—the page loads the public OurAirports dataset and shows the nearest known airport, clearly labeled as proximity only and not a confirmed origin or destination. "Registered in" is the aircraft's registration country, not its departure airport. Squawk 7500/7600/7700 are universal emergency transponder codes, and "ident activated" reflects a pilot pressing the ident button at ATC's request—both shown for awareness, not diagnosis.
+    Live position data is requested first from Airplanes.live and automatically falls back to OpenSky Network if the primary feed cannot be reached. Both services are community-supported receiver networks with no uptime guarantee, so a quiet scope can mean no nearby receiver is reporting rather than an empty sky. If both feeds are temporarily unavailable, the page retries with progressively longer pauses while the most recent successful aircraft data remains visible. Position ages continue updating every second during an interruption: records become stale after 60 seconds, outdated after 120 seconds, and are removed after five minutes without contact. Outdated positions remain visible on their cards for context, but are excluded from the live count, closest/highest/fastest summaries, and radar dots. Aircraft type, registration, and registered owner come from hexdb.io when available. Scheduled airline origin and destination come from adsbdb.com by matching the callsign; airport names, cities, countries, coordinates, and elevations are shown when supplied. Because airline flight numbers can be reused or route records can be stale, the aircraft's live position is checked against the reported great-circle route corridor. Progress and time remaining appear only when that route is geographically plausible; otherwise the route is clearly marked unverified. Any displayed progress and time remaining are straight-line estimates, not official operational ETAs. When no scheduled route exists—common for private/general-aviation tail numbers—the page loads the public OurAirports dataset and shows the nearest known airport, clearly labeled as proximity only and not a confirmed origin or destination. "Registered in" is the aircraft's registration country, not its departure airport. Squawk 7500/7600/7700 are universal emergency transponder codes, and "ident activated" reflects a pilot pressing the ident button at ATC's request—both shown for awareness, not diagnosis.
   </div>
 </div>
 
@@ -269,9 +269,10 @@ let refreshTimer = null, countdownTimer = null, secondsToNext = 0;
 let scanInProgress = false;
 let consecutiveScanFailures = 0;
 let lastSuccessfulScanAt = null;
+let lastLiveFeedSource = null;
 const REFRESH_SECONDS = 30;
-const MAX_BACKOFF_SECONDS = 180;
-const REQUEST_TIMEOUT_MS = 12000;
+const MAX_BACKOFF_SECONDS = 120;
+const REQUEST_TIMEOUT_MS = 8000;
 const STALE_POSITION_SECONDS = 60;
 const OUTDATED_POSITION_SECONDS = 120;
 const REMOVE_POSITION_SECONDS = 300;
@@ -397,6 +398,155 @@ async function fetchWithRetry(url, retries=2){
   throw lastErr;
 }
 
+function feetToMeters(value){
+  const n = Number(value);
+  return Number.isFinite(n) ? n/3.28084 : null;
+}
+
+function knotsToMetersPerSecond(value){
+  const n = Number(value);
+  return Number.isFinite(n) ? n*0.514444 : null;
+}
+
+function feetPerMinuteToMetersPerSecond(value){
+  const n = Number(value);
+  return Number.isFinite(n) ? n/196.8504 : null;
+}
+
+function registrationCountry(registration, icao24){
+  const reg = String(registration || "").trim().toUpperCase();
+  const rules = [
+    [/^N\d/, "United States"], [/^C-[FGI]/, "Canada"], [/^G-/, "United Kingdom"],
+    [/^D-/, "Germany"], [/^F-/, "France"], [/^EC-/, "Spain"], [/^I-/, "Italy"],
+    [/^PH-/, "Netherlands"], [/^HB-/, "Switzerland"], [/^OE-/, "Austria"],
+    [/^OO-/, "Belgium"], [/^SE-/, "Sweden"], [/^LN-/, "Norway"], [/^OY-/, "Denmark"],
+    [/^OH-/, "Finland"], [/^EI-/, "Ireland"], [/^SP-/, "Poland"], [/^TC-/, "Türkiye"],
+    [/^VH-/, "Australia"], [/^ZK-/, "New Zealand"], [/^JA/, "Japan"], [/^HL/, "South Korea"],
+    [/^VT-/, "India"], [/^9V-/, "Singapore"], [/^A6-/, "United Arab Emirates"],
+    [/^A7-/, "Qatar"], [/^B-/, "China"], [/^(PR-|PP-|PT-)/, "Brazil"],
+    [/^(XA-|XB-|XC-)/, "Mexico"]
+  ];
+  for(const [pattern, country] of rules){
+    if(pattern.test(reg)) return country;
+  }
+
+  const hex = parseInt(String(icao24 || "").replace(/^~/, ""), 16);
+  if(Number.isFinite(hex)){
+    if(hex>=0xA00000 && hex<=0xAFFFFF) return "United States";
+    if(hex>=0xC00000 && hex<=0xC3FFFF) return "Canada";
+    if(hex>=0x400000 && hex<=0x43FFFF) return "United Kingdom";
+    if(hex>=0x3C0000 && hex<=0x3FFFFF) return "Germany";
+  }
+  return "unknown";
+}
+
+function normalizeReadsbAircraft(payload, sourceName){
+  const rows = Array.isArray(payload?.ac)
+    ? payload.ac
+    : (Array.isArray(payload?.aircraft) ? payload.aircraft : []);
+  const feedNow = Number(payload?.now);
+  const nowSec = Number.isFinite(feedNow) ? feedNow : Date.now()/1000;
+
+  return rows.map(a=>{
+    const fallbackPosition = a?.lastPosition || null;
+    const directLat = Number(a?.lat), directLon = Number(a?.lon);
+    const fallbackLat = Number(fallbackPosition?.lat), fallbackLon = Number(fallbackPosition?.lon);
+    const hasDirectPosition = Number.isFinite(directLat) && Number.isFinite(directLon);
+    const lat = hasDirectPosition ? directLat : fallbackLat;
+    const lon = hasDirectPosition ? directLon : fallbackLon;
+    if(!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+    const seenPosRaw = hasDirectPosition ? a?.seen_pos : fallbackPosition?.seen_pos;
+    const seenRaw = Number(seenPosRaw ?? a?.seen);
+    const lastContact = Number.isFinite(seenRaw) ? nowSec-seenRaw : nowSec;
+    const rawHex = String(a?.hex || "").replace(/^~/, "").toLowerCase();
+    if(!rawHex) return null;
+
+    const onGround = String(a?.alt_baro || "").toLowerCase()==="ground";
+    const callsign = String(a?.flight || a?.r || "").trim() || "—";
+    const registration = String(a?.r || "").trim() || null;
+    const typeLabel = String(a?.desc || a?.t || "").trim() || null;
+    const owner = String(a?.ownOp || "").trim() || null;
+
+    if(!typeCache[rawHex] && (registration || typeLabel || owner)){
+      typeCache[rawHex] = {typeLabel, registration, owner};
+    }
+
+    return {
+      icao24:rawHex,
+      callsign,
+      regCountry:registrationCountry(registration, rawHex),
+      timePosition:lastContact,
+      lastContact,
+      lon,
+      lat,
+      baroAlt:onGround ? 0 : feetToMeters(a?.alt_baro),
+      onGround,
+      velocity:knotsToMetersPerSecond(a?.gs),
+      track:Number.isFinite(Number(a?.track)) ? Number(a.track) : null,
+      vRate:feetPerMinuteToMetersPerSecond(a?.baro_rate ?? a?.geom_rate),
+      geoAlt:feetToMeters(a?.alt_geom),
+      squawk:a?.squawk!=null ? String(a.squawk).padStart(4,"0") : null,
+      spi:!!a?.spi,
+      posSource:String(a?.type || "other"),
+      category:a?.category ?? null,
+      feedSource:sourceName
+    };
+  }).filter(Boolean);
+}
+
+function normalizeOpenSkyAircraft(data){
+  const states = Array.isArray(data?.states) ? data.states : [];
+  return states.map(s=>({
+    icao24:s[0], callsign:(s[1]||"").trim()||"—", regCountry:s[2],
+    timePosition:s[3], lastContact:s[4],
+    lon:s[5], lat:s[6], baroAlt:s[7], onGround:s[8], velocity:s[9],
+    track:s[10], vRate:s[11], geoAlt:s[13], squawk:s[14], spi:s[15], posSource:s[16],
+    category:s.length>17 ? s[17] : null, feedSource:"OpenSky"
+  })).filter(p=>p.lat!=null && p.lon!=null);
+}
+
+async function fetchJsonForLiveFeed(url, timeoutMs=REQUEST_TIMEOUT_MS){
+  const controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), timeoutMs);
+  try{
+    const response = await fetch(url, {
+      signal:controller.signal,
+      cache:"no-store",
+      headers:{Accept:"application/json"}
+    });
+    if(!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchLiveAircraft(lamin, lomin, lamax, lomax){
+  const failures=[];
+  const radiusNm = Math.max(1, Math.min(250, radiusMiles*0.868976));
+
+  try{
+    const url = `https://api.airplanes.live/v2/point/${userLat.toFixed(5)}/${userLon.toFixed(5)}/${radiusNm.toFixed(1)}`;
+    const payload = await fetchJsonForLiveFeed(url);
+    return {planes:normalizeReadsbAircraft(payload, "Airplanes.live"), source:"Airplanes.live"};
+  } catch(error){
+    failures.push(`Airplanes.live: ${describeFetchFailure(error)}`);
+  }
+
+  try{
+    const openSkyUrl = `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}&extended=1`;
+    const fetchUrl = CFG.corsProxy ? CFG.corsProxy + encodeURIComponent(openSkyUrl) : openSkyUrl;
+    const response = await fetchWithRetry(fetchUrl, 0);
+    const payload = await response.json();
+    return {planes:normalizeOpenSkyAircraft(payload), source:"OpenSky"};
+  } catch(error){
+    failures.push(`OpenSky: ${describeFetchFailure(error)}`);
+  }
+
+  throw new Error(failures.join("; "));
+}
+
 function scheduleNextScan(delaySeconds){
   clearTimeout(refreshTimer);
   secondsToNext = delaySeconds;
@@ -460,19 +610,9 @@ async function scanNow(){
   const lomin=userLon-lonDelta, lomax=userLon+lonDelta;
 
   try{
-    const openSkyUrl = `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}&extended=1`;
-    const fetchUrl = CFG.corsProxy ? CFG.corsProxy + encodeURIComponent(openSkyUrl) : openSkyUrl;
-    const res = await fetchWithRetry(fetchUrl);
-    const data = await res.json();
-    const states = data.states || [];
-
-    const planes = states.map(s=>({
-      icao24:s[0], callsign:(s[1]||"").trim()||"—", regCountry:s[2],
-      timePosition:s[3], lastContact:s[4],
-      lon:s[5], lat:s[6], baroAlt:s[7], onGround:s[8], velocity:s[9],
-      track:s[10], vRate:s[11], geoAlt:s[13], squawk:s[14], spi:s[15], posSource:s[16],
-      category:s.length>17 ? s[17] : null
-    })).filter(p=>p.lat!=null && p.lon!=null);
+    const liveResult = await fetchLiveAircraft(lamin, lomin, lamax, lomax);
+    const planes = liveResult.planes;
+    lastLiveFeedSource = liveResult.source;
 
     planes.forEach(p=>{
       p.distance = haversineMiles(userLat,userLon,p.lat,p.lon);
@@ -494,7 +634,7 @@ async function scanNow(){
       : "";
     setStatus(
       `${summary.live.length} live aircraft in range${outdatedText}. `+
-      `Last successful fetch ${lastSuccessfulScanAt.toLocaleTimeString()}.`
+      `Live feed: ${lastLiveFeedSource}. Last successful fetch ${lastSuccessfulScanAt.toLocaleTimeString()}.`
     );
     renderFacts();
     renderStrips();
@@ -507,14 +647,15 @@ async function scanNow(){
     consecutiveScanFailures += 1;
     const retrySeconds = Math.min(
       MAX_BACKOFF_SECONDS,
-      REFRESH_SECONDS * Math.pow(2, Math.min(consecutiveScanFailures, 3))
+      REFRESH_SECONDS * Math.pow(2, Math.min(Math.max(consecutiveScanFailures-1, 0), 2))
     );
     const previousData = lastSuccessfulScanAt
       ? " Showing cached aircraft data from the last successful fetch at "+lastSuccessfulScanAt.toLocaleTimeString()+"."
       : " No live aircraft data has been received yet.";
     setStatus(
-      "Temporary live-feed interruption: "+describeFetchFailure(e)+"."+
-      previousData+" Retrying automatically in "+retrySeconds+"s.",
+      "Temporary live-feed interruption: both Airplanes.live and OpenSky were unavailable ("+
+      describeFetchFailure(e)+")."+previousData+
+      " Retrying automatically in "+retrySeconds+"s.",
       true
     );
     scheduleNextScan(retrySeconds);
@@ -553,10 +694,33 @@ function airlineName(callsign){
 }
 
 function posSourceLabel(n){
+  if(typeof n === "string"){
+    const source = n.toLowerCase();
+    if(source.includes("adsb")) return "ADS-B";
+    if(source.includes("adsr")) return "ADS-R";
+    if(source.includes("tisb")) return "TIS-B";
+    if(source === "mlat") return "multilateration";
+    if(source === "adsc") return "ADS-C";
+    if(source === "mode_s") return "Mode S";
+    return source.replaceAll("_", " ");
+  }
   return {0:"ADS-B", 1:"ASTERIX", 2:"multilateration", 3:"FLARM"}[n] || "unknown";
 }
 
 function categoryLabel(n){
+  if(typeof n === "string"){
+    return {
+      A0:"No category information", A1:"Light aircraft (<15,500 lb)",
+      A2:"Small aircraft (15,500–75,000 lb)", A3:"Large aircraft (75,000–300,000 lb)",
+      A4:"High-vortex large", A5:"Heavy aircraft (>300,000 lb)",
+      A6:"High-performance aircraft", A7:"Rotorcraft",
+      B0:"No category information", B1:"Glider / sailplane", B2:"Lighter-than-air",
+      B3:"Parachutist / skydiver", B4:"Ultralight / hang-glider", B5:"Reserved category",
+      B6:"Unmanned aerial vehicle", B7:"Space / trans-atmospheric",
+      C0:"No category information", C1:"Emergency surface vehicle", C2:"Service surface vehicle",
+      C3:"Point obstacle", C4:"Cluster obstacle", C5:"Line obstacle"
+    }[n.toUpperCase()] || "Unknown";
+  }
   return {
     0:"No category information", 1:"Emitter category unavailable", 2:"Light aircraft (<15,500 lb)",
     3:"Small aircraft (15,500–75,000 lb)", 4:"Large aircraft (75,000–300,000 lb)",
@@ -1084,7 +1248,7 @@ async function loadAirportData(){
 }
 
 function findNearestAirport(plane, airports){
-  const isRotorcraft = plane.category===8;
+  const isRotorcraft = plane.category===8 || String(plane.category||"").toUpperCase()==="A7";
   const allowed = isRotorcraft
     ? new Set(["large_airport","medium_airport","small_airport","heliport"])
     : new Set(["large_airport","medium_airport","small_airport"]);
