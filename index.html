@@ -208,7 +208,7 @@ canvas{position:absolute;top:0;left:0;}
 .view-btn.active,.mini-btn.active{border-color:var(--phosphor-dim);color:var(--phosphor);background:rgba(59,226,138,.11);}
 .check-label{display:flex;align-items:center;gap:6px;color:var(--dim);font-size:10px;white-space:nowrap;}
 .check-label input{accent-color:var(--phosphor);}
-.feed-grid{display:grid;grid-template-columns:1fr;gap:7px;}
+.feed-grid{display:grid;grid-template-columns:1fr;gap:7px;max-height:190px;overflow:auto;padding-right:2px;}
 .feed-line{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;border-bottom:1px solid rgba(27,50,63,.65);padding-bottom:6px;}
 .feed-line:last-child{border-bottom:0;padding-bottom:0;}
 .feed-name{font-size:10px;color:var(--text);}.feed-meta{font-size:9px;color:var(--dim);text-align:right;}
@@ -247,7 +247,7 @@ canvas{position:absolute;top:0;left:0;}
     <h1>AIRSPACE</h1>
     <div class="clock" id="clock">--:--:--</div>
   </div>
-  <div class="subtitle">local aircraft scope — Airplanes.live + OpenSky Network + hexdb.io + adsbdb.com (100% free, no keys)</div>
+  <div class="subtitle">local aircraft scope — Airplanes.live + adsb.fi + adsb.lol + OpenSky Network + hexdb.io + adsbdb.com (100% free, no keys)</div>
 
   <div class="controls">
     <div class="field country-field">
@@ -295,6 +295,8 @@ canvas{position:absolute;top:0;left:0;}
       <div class="ops-title">Live-feed health</div>
       <div class="feed-grid" id="feedHealthPanel">
         <div class="feed-line"><div class="feed-name"><span class="health-dot"></span>Airplanes.live</div><div class="feed-meta">not checked</div></div>
+        <div class="feed-line"><div class="feed-name"><span class="health-dot"></span>adsb.fi</div><div class="feed-meta">not checked</div></div>
+        <div class="feed-line"><div class="feed-name"><span class="health-dot"></span>adsb.lol</div><div class="feed-meta">not checked</div></div>
         <div class="feed-line"><div class="feed-name"><span class="health-dot"></span>OpenSky</div><div class="feed-meta">not checked</div></div>
         <div class="feed-line"><div class="feed-name">Cached snapshot</div><div class="feed-meta" id="snapshotHealth">none</div></div>
       </div>
@@ -1545,6 +1547,8 @@ const weatherCache = {};
 const opsDataState = {promise:null, runways:null, frequencies:null, error:null};
 const feedHealth = {
   "Airplanes.live":{status:"idle",latency:null,lastSuccess:null,lastAttempt:null,error:null},
+  "adsb.fi":{status:"idle",latency:null,lastSuccess:null,lastAttempt:null,error:null},
+  "adsb.lol":{status:"idle",latency:null,lastSuccess:null,lastAttempt:null,error:null},
   "OpenSky":{status:"idle",latency:null,lastSuccess:null,lastAttempt:null,error:null}
 };
 const filters = {search:"", operator:"all", motion:"all", sort:"distance", showOutdated:true, commercialFirst:false};
@@ -1699,28 +1703,66 @@ function mergeAircraftSets(results){
 async function fetchLiveAircraft(lamin,lomin,lamax,lomax){
   liveFetchSequence++;
   const radiusNm=Math.max(1,Math.min(250,radiusMiles*.868976));
-  const airplanesUrl=`https://api.airplanes.live/v2/point/${userLat.toFixed(5)}/${userLon.toFixed(5)}/${radiusNm.toFixed(1)}`;
+  const lat=userLat.toFixed(5), lon=userLon.toFixed(5), radius=radiusNm.toFixed(1);
+  const airplanesUrl=`https://api.airplanes.live/v2/point/${lat}/${lon}/${radius}`;
+  const adsbFiUrl=`https://opendata.adsb.fi/api/v3/lat/${lat}/lon/${lon}/dist/${radius}`;
+  const adsbLolUrl=`https://api.adsb.lol/v2/point/${lat}/${lon}/${radius}`;
   const openSkyUrlRaw=`https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}&extended=1`;
   const openSkyUrl=CFG.corsProxy?CFG.corsProxy+encodeURIComponent(openSkyUrlRaw):openSkyUrlRaw;
-  const airplanesPromise=feedRequest("Airplanes.live",airplanesUrl,p=>normalizeReadsbAircraft(p,"Airplanes.live"),6500);
-  const backupDue=!lastOpenSkyAttemptAt||Date.now()-lastOpenSkyAttemptAt>=OPEN_SKY_HEALTH_INTERVAL_MS||feedHealth["Airplanes.live"].status==="error";
-  let requests=[airplanesPromise];
-  if(backupDue){lastOpenSkyAttemptAt=Date.now();requests.push(feedRequest("OpenSky",openSkyUrl,normalizeOpenSkyAircraft,5500));}
-  try{
-    if(requests.length===1){const first=await airplanesPromise;return{planes:first.planes,source:first.source,sources:[first]};}
-    const first=await Promise.any(requests);
-    const settled=await Promise.race([Promise.allSettled(requests),sleep(1200).then(()=>null)]);
-    const successes=settled?settled.filter(x=>x.status==="fulfilled").map(x=>x.value):[first];
-    const planes=mergeAircraftSets(successes);return{planes,source:successes.map(x=>x.source).join(" + "),sources:successes};
-  }catch(primaryError){
-    if(!backupDue){lastOpenSkyAttemptAt=Date.now();const fallback=await feedRequest("OpenSky",openSkyUrl,normalizeOpenSkyAircraft,5500);return{planes:fallback.planes,source:fallback.source,sources:[fallback]};}
-    throw primaryError;
+
+  // Query three independent readsb-compatible community networks in parallel.
+  // A failure or empty response from one provider never blocks data from the others.
+  const primaryRequests=[
+    feedRequest("Airplanes.live",airplanesUrl,p=>normalizeReadsbAircraft(p,"Airplanes.live"),6000),
+    feedRequest("adsb.fi",adsbFiUrl,p=>normalizeReadsbAircraft(p,"adsb.fi"),6000),
+    feedRequest("adsb.lol",adsbLolUrl,p=>normalizeReadsbAircraft(p,"adsb.lol"),6000)
+  ];
+
+  const openSkyDue=!lastOpenSkyAttemptAt
+    || Date.now()-lastOpenSkyAttemptAt>=OPEN_SKY_HEALTH_INTERVAL_MS
+    || ["Airplanes.live","adsb.fi","adsb.lol"].every(name=>feedHealth[name].status==="error");
+
+  const allRequests=[...primaryRequests];
+  if(openSkyDue){
+    lastOpenSkyAttemptAt=Date.now();
+    allRequests.push(feedRequest("OpenSky",openSkyUrl,normalizeOpenSkyAircraft,5500));
   }
+
+  let settled=await Promise.allSettled(allRequests);
+  let successes=settled.filter(item=>item.status==="fulfilled").map(item=>item.value);
+  let planes=mergeAircraftSets(successes);
+
+  // If the community feeds were reachable but all returned zero aircraft, ask OpenSky
+  // immediately instead of waiting for the next scheduled health check. This helps in
+  // regions where receiver coverage differs substantially between networks.
+  if(!planes.length && !openSkyDue){
+    lastOpenSkyAttemptAt=Date.now();
+    const openSkyResult=await Promise.allSettled([
+      feedRequest("OpenSky",openSkyUrl,normalizeOpenSkyAircraft,5500)
+    ]);
+    const openSkySuccess=openSkyResult.find(item=>item.status==="fulfilled")?.value;
+    if(openSkySuccess){
+      successes.push(openSkySuccess);
+      planes=mergeAircraftSets(successes);
+    }
+  }
+
+  if(!successes.length){
+    const failures=settled
+      .filter(item=>item.status==="rejected")
+      .map(item=>item.reason?.message||"feed unavailable")
+      .join("; ");
+    throw new Error(failures||"all live aircraft feeds were unavailable");
+  }
+
+  const names=successes.map(item=>item.source);
+  const sourceLabel=names.length===1?names[0]:`${names.length} feeds merged`;
+  return{planes,source:sourceLabel,sources:successes,sourceNames:names};
 }
 
 // Keep the richer Airplanes.live quality fields.
 function normalizeReadsbAircraft(payload,sourceName){
-  const rows=Array.isArray(payload?.ac)?payload.ac:(Array.isArray(payload?.aircraft)?payload.aircraft:[]);const feedNow=Number(payload?.now);const nowSec=Number.isFinite(feedNow)?feedNow:Date.now()/1000;
+  const rows=Array.isArray(payload?.ac)?payload.ac:(Array.isArray(payload?.aircraft)?payload.aircraft:[]);const feedNow=Number(payload?.now);const nowSec=Number.isFinite(feedNow)?(feedNow>1e12?feedNow/1000:feedNow):Date.now()/1000;
   return rows.map(a=>{const fp=a?.lastPosition||null,dl=Number(a?.lat),dn=Number(a?.lon),fl=Number(fp?.lat),fn=Number(fp?.lon),direct=Number.isFinite(dl)&&Number.isFinite(dn),lat=direct?dl:fl,lon=direct?dn:fn;if(!Number.isFinite(lat)||!Number.isFinite(lon))return null;
     const seen=Number((direct?a?.seen_pos:fp?.seen_pos)??a?.seen),lastContact=Number.isFinite(seen)?nowSec-seen:nowSec,rawHex=String(a?.hex||"").replace(/^~/,"").toLowerCase();if(!rawHex)return null;
     const onGround=String(a?.alt_baro||"").toLowerCase()==="ground",callsign=String(a?.flight||a?.r||"").trim()||"—",registration=String(a?.r||"").trim()||null,typeLabel=String(a?.desc||a?.t||"").trim()||null,owner=String(a?.ownOp||"").trim()||null;if(!typeCache[rawHex]&&(registration||typeLabel||owner))typeCache[rawHex]={typeLabel,registration,owner};
