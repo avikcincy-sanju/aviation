@@ -285,6 +285,34 @@ function compass(deg){
   return dirs[Math.round(deg/22.5)%16];
 }
 
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+function describeHttpError(status){
+  if(status===429) return "OpenSky's free tier is rate-limited and you've hit that limit — wait a bit and try again.";
+  if(status===408) return "OpenSky's server timed out responding (a temporary overload on their end, not a rate limit).";
+  if(status>=500) return "OpenSky's server had a temporary error ("+status+").";
+  return "OpenSky returned an error ("+status+").";
+}
+
+async function fetchWithRetry(url, retries=2, delayMs=1500){
+  let lastErr;
+  for(let attempt=0; attempt<=retries; attempt++){
+    try{
+      const res = await fetch(url);
+      if(res.ok) return res;
+      lastErr = new Error(describeHttpError(res.status));
+      const retryable = res.status===429 || res.status===408 || res.status>=500;
+      if(retryable && attempt<retries){ await sleep(delayMs); continue; }
+      throw lastErr;
+    } catch(e){
+      lastErr = e;
+      if(attempt<retries){ await sleep(delayMs); continue; }
+      throw lastErr;
+    }
+  }
+  throw lastErr;
+}
+
 async function beginScan(){
   const zip = document.getElementById('zip').value.trim();
   const latInput = document.getElementById('lat').value.trim();
@@ -343,8 +371,7 @@ async function scanNow(){
   try{
     const openSkyUrl = `https://opensky-network.org/api/states/all?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
     const fetchUrl = CFG.corsProxy ? CFG.corsProxy + encodeURIComponent(openSkyUrl) : openSkyUrl;
-    const res = await fetch(fetchUrl);
-    if(!res.ok) throw new Error("OpenSky returned an error ("+res.status+"). Its free tier is rate-limited — wait a bit and try again.");
+    const res = await fetchWithRetry(fetchUrl);
     const data = await res.json();
     const states = data.states || [];
 
@@ -366,7 +393,7 @@ async function scanNow(){
     renderStrips();
     enrichTypes();
   } catch(e){
-    setStatus("Live feed unavailable: "+e.message+" (Free public APIs sometimes rate-limit or block direct browser requests — this runs more reliably with your own ADS-B receiver feeding the page server-side.)", true);
+    setStatus("Live feed unavailable: "+e.message+" (Already retried automatically a couple of times. If this keeps happening often, it's a sign OpenSky's shared free tier is the bottleneck — a personal ADS-B receiver would remove that dependency entirely.)", true);
   } finally {
     scanInProgress = false;
   }
